@@ -1,0 +1,15 @@
+<UserControl x:Class="MeetSimple.Views.LevelMetersControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel>
+        <TextBlock Text="Your microphone" FontWeight="SemiBold" />
+        <ProgressBar x:Name="MicrophoneBar" Maximum="100" Margin="0,6,0,3" />
+        <TextBlock x:Name="MicrophoneStatus" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                   TextWrapping="Wrap" Margin="0,0,0,16" />
+
+        <TextBlock Text="Computer audio (the other people on the call)" FontWeight="SemiBold" />
+        <ProgressBar x:Name="ComputerBar" Maximum="100" Margin="0,6,0,3" />
+        <TextBlock x:Name="ComputerStatus" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                   TextWrapping="Wrap" />
+    </StackPanel>
+</UserControl>
