@@ -8,6 +8,31 @@ public static class SpeechModelStore
 
     public static string PathFor(string modelId) => Path.Combine(ModelsFolder, $"ggml-{modelId}.bin");
 
+    /// <summary>Silero VAD in whisper.cpp's format (under 1 MB): finds where people speak (see VoiceDetector).</summary>
+    public static string VoiceDetectorPath => Path.Combine(ModelsFolder, "ggml-silero-v5.1.2.bin");
+
+    private const string VoiceDetectorUrl = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
+
+    /// <summary>
+    /// Makes sure the voice detector is on disk; returns its path, or null if it could not be fetched (transcription
+    /// then simply runs on the full recording, as before). Verified like the speech models.
+    /// </summary>
+    public static async Task<string?> EnsureVoiceDetectorAsync(IProgress<ProgressInfo> progress, CancellationToken cancellationToken)
+    {
+        if (File.Exists(VoiceDetectorPath)) return VoiceDetectorPath;
+        try
+        {
+            progress.Report(new ProgressInfo(null, "Getting the voice detector..."));
+            await Downloader.DownloadAsync(VoiceDetectorUrl, VoiceDetectorPath, DownloadPolicies.HuggingFace, progress, cancellationToken, VerifyChecksum);
+            return VoiceDetectorPath;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            AppHealth.LogError(error, "Voice detector download (transcribing without it)");
+            return null;
+        }
+    }
+
     public static async Task<(string Path, bool AlreadyPresent)> EnsureAsync(
         string modelId, IProgress<ProgressInfo> progress, CancellationToken cancellationToken)
     {

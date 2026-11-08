@@ -2,10 +2,17 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- The Windows 10 SDK target gives access to Windows notifications (call recorded: Summarize / Transcribe / Save). -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- Only for the tray icon (NotifyIcon); its namespaces are kept out of global usings below to avoid WPF name clashes. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Product>Meet Simple</Product>
+    <AssemblyTitle>Meet Simple</AssemblyTitle>
     <RootNamespace>MeetSimple</RootNamespace>
     <AssemblyName>MeetSimple</AssemblyName>
     <Platforms>x64</Platforms>
@@ -45,6 +52,8 @@
     <!-- WPF projects leave these out of ImplicitUsings -->
     <Using Include="System.IO" />
     <Using Include="System.Net.Http" />
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
   </ItemGroup>
 
   <!-- Inter (Regular / Medium / SemiBold / Bold) and Inter Display Bold, embedded. The OFL licence must ship with the fonts. -->
@@ -58,6 +67,9 @@
     <!-- Explicit so packages.lock.json matches both `dotnet build` and single-file `dotnet publish`
          (publish injects this otherwise and locked-mode restore fails with NU1004). -->
     <PackageReference Include="Microsoft.NET.ILLink.Tasks" Version="8.0.33" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+    <!-- The notification library pulls in System.Drawing.Common 4.7.0 (GHSA-rxg9-xrhp-64gj); pin a patched version. -->
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Whisper.net" Version="1.9.0" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.0" />

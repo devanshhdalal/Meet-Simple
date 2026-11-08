@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 
 namespace MeetSimple.Core;
 
@@ -14,20 +15,29 @@ public sealed class RecordingResult
 
 /// <summary>
 /// Captures the microphone ("You") and the computer's output sound ("Others") as two separate tracks.
-/// Monitoring (level meters only) can run without recording.
+/// Monitoring (level meters only) can run without recording. Either device can be switched while recording: the
+/// track carries on in the same file, so a call that turns out to play on a headset is fixed with one click.
 /// </summary>
 public sealed class AudioRecorder : IDisposable
 {
     private const long MinimumFreeBytesToRecord = 2L * 1024 * 1024 * 1024;
 
     private readonly object gate = new();
+    private string? microphoneDeviceId;
+    private string? speakerDeviceId;
+    private MMDeviceEnumerator? deviceEnumerator;
+    private MMDevice? microphoneDevice;
+    private MMDevice? speakerDevice;
     private WasapiCapture? microphoneCapture;
     private WasapiLoopbackCapture? computerCapture;
     private TrackWriter? microphoneWriter;
     private TrackWriter? computerWriter;
+    private string? recordingFolder;
     private Stopwatch? clock;
     private float microphoneLevel;
     private float computerLevel;
+    private float microphonePeakSinceRead;
+    private float computerPeakSinceRead;
     private TimeSpan finalDuration;
     private bool isDisposed;
 
@@ -41,35 +51,252 @@ public sealed class AudioRecorder : IDisposable
     public float ComputerAudioLevel => Volatile.Read(ref computerLevel);
     public TimeSpan Elapsed => IsRecording && clock != null ? clock.Elapsed : finalDuration;
 
+    /// <summary>The microphone being recorded (null if none could be opened).</summary>
+    public AudioDevice? Microphone { get; private set; }
+
+    /// <summary>The output whose sound is being recorded (null if none could be opened).</summary>
+    public AudioDevice? ComputerAudio { get; private set; }
+
+    /// <param name="microphoneDeviceId">Record this microphone instead of the Windows default (for a call: the one the call app uses).</param>
+    /// <param name="speakerDeviceId">Record what plays on this output instead of the default (call apps often use the headset).</param>
+    public AudioRecorder(string? microphoneDeviceId = null, string? speakerDeviceId = null)
+    {
+        this.microphoneDeviceId = microphoneDeviceId;
+        this.speakerDeviceId = speakerDeviceId;
+    }
+
+    /// <summary>Highest microphone level since the last call (0..1), so a meter drawn at 60 fps misses no peak.</summary>
+    public float TakeMicrophonePeak() => Interlocked.Exchange(ref microphonePeakSinceRead, 0f);
+
+    /// <summary>Highest computer-audio level since the last call (0..1).</summary>
+    public float TakeComputerAudioPeak() => Interlocked.Exchange(ref computerPeakSinceRead, 0f);
+
     public void StartMonitoring()
     {
-        if (microphoneCapture != null || computerCapture != null) return;
+        if (microphoneCapture == null)
+        {
+            try
+            {
+                OpenMicrophone();
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                MicrophoneError = error.Message;
+            }
+        }
 
+        if (computerCapture == null)
+        {
+            try
+            {
+                OpenComputerAudio();
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                ComputerAudioError = error.Message;
+            }
+        }
+    }
+
+    private void OpenMicrophone()
+    {
+        var device = OpenActiveDevice(microphoneDeviceId) ?? DefaultDevice(DataFlow.Capture, Role.Console);
+        WasapiCapture capture;
         try
         {
-            var capture = new WasapiCapture();
-            capture.DataAvailable += OnMicrophoneData;
-            capture.RecordingStopped += (_, stopped) => OnCaptureStopped(stopped.Exception, isMicrophone: true);
-            capture.StartRecording();
-            microphoneCapture = capture;
+            capture = new WasapiCapture(device);
         }
-        catch (Exception error)
+        catch
+        {
+            device.Dispose();
+            throw;
+        }
+        capture.DataAvailable += (_, data) => OnMicrophoneData(capture, data);
+        capture.RecordingStopped += (_, stopped) =>
+        {
+            if (ReferenceEquals(capture, microphoneCapture)) OnCaptureStopped(stopped.Exception, isMicrophone: true);
+        };
+        lock (gate)
+        {
+            microphoneCapture = capture;
+            microphoneDevice = device;
+            microphoneWriter?.ChangeInput(capture.WaveFormat);
+            // A microphone found after the recording began still joins it, in step with the other track.
+            if (IsRecording && microphoneWriter == null && recordingFolder != null && clock != null)
+            {
+                microphoneWriter = new TrackWriter(recordingFolder, "microphone", capture.WaveFormat, clock);
+            }
+        }
+        Microphone = new AudioDevice(device.ID, device.FriendlyName);
+        MicrophoneError = null;
+        try
+        {
+            capture.StartRecording();
+        }
+        catch
+        {
+            lock (gate)
+            {
+                if (ReferenceEquals(microphoneCapture, capture)) microphoneCapture = null;
+                if (ReferenceEquals(microphoneDevice, device)) microphoneDevice = null;
+            }
+            Microphone = null;
+            StopQuietly(capture);
+            device.Dispose();
+            throw;
+        }
+    }
+
+    private void OpenComputerAudio()
+    {
+        var device = OpenActiveDevice(speakerDeviceId) ?? DefaultDevice(DataFlow.Render, Role.Multimedia);
+        WasapiLoopbackCapture capture;
+        try
+        {
+            capture = new WasapiLoopbackCapture(device);
+        }
+        catch
+        {
+            device.Dispose();
+            throw;
+        }
+        capture.DataAvailable += (_, data) => OnComputerData(capture, data);
+        capture.RecordingStopped += (_, stopped) =>
+        {
+            if (ReferenceEquals(capture, computerCapture)) OnCaptureStopped(stopped.Exception, isMicrophone: false);
+        };
+        lock (gate)
+        {
+            computerCapture = capture;
+            speakerDevice = device;
+            computerWriter?.ChangeInput(capture.WaveFormat);
+            if (IsRecording && computerWriter == null && recordingFolder != null && clock != null)
+            {
+                computerWriter = new TrackWriter(recordingFolder, "computer-audio", capture.WaveFormat, clock);
+            }
+        }
+        ComputerAudio = new AudioDevice(device.ID, device.FriendlyName);
+        ComputerAudioError = null;
+        try
+        {
+            capture.StartRecording();
+        }
+        catch
+        {
+            lock (gate)
+            {
+                if (ReferenceEquals(computerCapture, capture)) computerCapture = null;
+                if (ReferenceEquals(speakerDevice, device)) speakerDevice = null;
+            }
+            ComputerAudio = null;
+            StopQuietly(capture);
+            device.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Records another microphone from now on; while recording, the "You" track continues in the same file.</summary>
+    public void SwitchMicrophone(string deviceId)
+    {
+        if (Microphone?.Id == deviceId && microphoneCapture != null) return;
+        microphoneDeviceId = deviceId;
+        WasapiCapture? oldCapture;
+        MMDevice? oldDevice;
+        lock (gate)
+        {
+            oldCapture = microphoneCapture;
+            oldDevice = microphoneDevice;
+            microphoneCapture = null; // Late buffers from the old device are ignored from here on.
+            microphoneDevice = null;
+        }
+        StopQuietly(oldCapture);
+        oldDevice?.Dispose();
+        Volatile.Write(ref microphoneLevel, 0f);
+        try
+        {
+            OpenMicrophone();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             MicrophoneError = error.Message;
+            Microphone = null;
+            DeviceProblem?.Invoke($"That microphone could not be opened ({error.Message}). Pick another one.");
         }
+    }
 
+    /// <summary>Records another output from now on; while recording, the "Others" track continues in the same file.</summary>
+    public void SwitchComputerAudio(string deviceId)
+    {
+        if (ComputerAudio?.Id == deviceId && computerCapture != null) return;
+        speakerDeviceId = deviceId;
+        WasapiLoopbackCapture? oldCapture;
+        MMDevice? oldDevice;
+        lock (gate)
+        {
+            oldCapture = computerCapture;
+            oldDevice = speakerDevice;
+            computerCapture = null;
+            speakerDevice = null;
+        }
+        StopQuietly(oldCapture);
+        oldDevice?.Dispose();
+        Volatile.Write(ref computerLevel, 0f);
         try
         {
-            var capture = new WasapiLoopbackCapture();
-            capture.DataAvailable += OnComputerData;
-            capture.RecordingStopped += (_, stopped) => OnCaptureStopped(stopped.Exception, isMicrophone: false);
-            capture.StartRecording();
-            computerCapture = capture;
+            OpenComputerAudio();
         }
-        catch (Exception error)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
             ComputerAudioError = error.Message;
+            ComputerAudio = null;
+            DeviceProblem?.Invoke($"That output could not be recorded ({error.Message}). Pick another one.");
         }
+    }
+
+    private static void StopQuietly(WasapiCapture? capture)
+    {
+        if (capture == null) return;
+        try
+        {
+            capture.StopRecording();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Already stopped or the device is gone; disposing is all that is left.
+        }
+        try
+        {
+            capture.Dispose();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Nothing more can be done with a capture that fails to close.
+        }
+    }
+
+    /// <summary>The requested device if it is still connected and active; null means "use the Windows default".</summary>
+    private MMDevice? OpenActiveDevice(string? deviceId)
+    {
+        if (string.IsNullOrEmpty(deviceId)) return null;
+        try
+        {
+            deviceEnumerator ??= new MMDeviceEnumerator();
+            var device = deviceEnumerator.GetDevice(deviceId);
+            if (device.State == DeviceState.Active) return device;
+            device.Dispose();
+        }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or ArgumentException)
+        {
+            // Unplugged since the call started; the default device is the best remaining choice.
+        }
+        return null;
+    }
+
+    /// <summary>The Windows default device, the same one NAudio would pick (throws when there is none).</summary>
+    private MMDevice DefaultDevice(DataFlow flow, Role role)
+    {
+        deviceEnumerator ??= new MMDeviceEnumerator();
+        return deviceEnumerator.GetDefaultAudioEndpoint(flow, role);
     }
 
     public void StartRecording(string folder)
@@ -81,6 +308,7 @@ public sealed class AudioRecorder : IDisposable
 
         lock (gate)
         {
+            recordingFolder = folder;
             clock = Stopwatch.StartNew();
             if (microphoneCapture != null)
             {
@@ -103,6 +331,7 @@ public sealed class AudioRecorder : IDisposable
             var computerPaths = FinishSafely(computerWriter);
             microphoneWriter = null;
             computerWriter = null;
+            recordingFolder = null;
             IsRecording = false;
             clock?.Stop();
             return new RecordingResult
@@ -114,35 +343,47 @@ public sealed class AudioRecorder : IDisposable
         }
     }
 
-    private void OnMicrophoneData(object? sender, WaveInEventArgs data)
+    private void OnMicrophoneData(WasapiCapture source, WaveInEventArgs data)
     {
-        var format = microphoneCapture?.WaveFormat;
-        if (format != null)
-        {
-            Volatile.Write(ref microphoneLevel, AudioLevels.Peak(data.Buffer, data.BytesRecorded, format));
-        }
-        WriteSafely(ref microphoneWriter, data, "microphone");
+        if (!ReferenceEquals(source, microphoneCapture)) return;
+        float peak = AudioLevels.Peak(data.Buffer, data.BytesRecorded, source.WaveFormat);
+        Volatile.Write(ref microphoneLevel, peak);
+        RaisePeak(ref microphonePeakSinceRead, peak);
+        WriteSafely(source, data, isMicrophone: true);
     }
 
-    private void OnComputerData(object? sender, WaveInEventArgs data)
+    private void OnComputerData(WasapiCapture source, WaveInEventArgs data)
     {
-        var format = computerCapture?.WaveFormat;
-        if (format != null)
+        if (!ReferenceEquals(source, computerCapture)) return;
+        float peak = AudioLevels.Peak(data.Buffer, data.BytesRecorded, source.WaveFormat);
+        Volatile.Write(ref computerLevel, peak);
+        RaisePeak(ref computerPeakSinceRead, peak);
+        WriteSafely(source, data, isMicrophone: false);
+    }
+
+    private static void RaisePeak(ref float peakSinceRead, float peak)
+    {
+        float seen = Volatile.Read(ref peakSinceRead);
+        while (peak > seen)
         {
-            Volatile.Write(ref computerLevel, AudioLevels.Peak(data.Buffer, data.BytesRecorded, format));
+            float before = Interlocked.CompareExchange(ref peakSinceRead, peak, seen);
+            if (before == seen) break;
+            seen = before;
         }
-        WriteSafely(ref computerWriter, data, "computer sound");
     }
 
     /// <summary>
     /// Runs on the capture thread, where an exception would close the whole app and lose the meeting.
     /// A failing track is closed and reported; the other track keeps recording.
     /// </summary>
-    private void WriteSafely(ref TrackWriter? writer, WaveInEventArgs data, string trackName)
+    private void WriteSafely(WasapiCapture source, WaveInEventArgs data, bool isMicrophone)
     {
         string? problem = null;
         lock (gate)
         {
+            // A buffer from a device that was just switched away from belongs to neither track.
+            if (!ReferenceEquals(source, isMicrophone ? microphoneCapture : computerCapture)) return;
+            var writer = isMicrophone ? microphoneWriter : computerWriter;
             if (writer == null) return;
             try
             {
@@ -159,7 +400,8 @@ public sealed class AudioRecorder : IDisposable
                 {
                     // The file is already unusable; nothing more to do.
                 }
-                writer = null;
+                if (isMicrophone) microphoneWriter = null; else computerWriter = null;
+                string trackName = isMicrophone ? "microphone" : "computer sound";
                 problem = $"Saving the {trackName} failed ({error.Message}). Is the drive full? "
                           + "That part of the recording stopped; the rest continues.";
             }
@@ -183,7 +425,7 @@ public sealed class AudioRecorder : IDisposable
             Volatile.Write(ref computerLevel, 0f);
         }
         DeviceProblem?.Invoke($"The {deviceName} stopped working ({error.Message}). It may have been unplugged or switched off. "
-                              + "Anything else keeps recording.");
+                              + "Pick another one; anything else keeps recording.");
     }
 
     private static IReadOnlyList<string>? FinishSafely(TrackWriter? writer)
@@ -206,12 +448,23 @@ public sealed class AudioRecorder : IDisposable
         {
             StopRecording();
         }
-        try { microphoneCapture?.StopRecording(); } catch (Exception) { }
-        try { computerCapture?.StopRecording(); } catch (Exception) { }
-        microphoneCapture?.Dispose();
-        computerCapture?.Dispose();
-        microphoneCapture = null;
-        computerCapture = null;
+        WasapiCapture? oldMicrophone;
+        WasapiCapture? oldComputer;
+        lock (gate)
+        {
+            oldMicrophone = microphoneCapture;
+            oldComputer = computerCapture;
+            microphoneCapture = null;
+            computerCapture = null;
+        }
+        StopQuietly(oldMicrophone);
+        StopQuietly(oldComputer);
+        microphoneDevice?.Dispose();
+        speakerDevice?.Dispose();
+        deviceEnumerator?.Dispose();
+        microphoneDevice = null;
+        speakerDevice = null;
+        deviceEnumerator = null;
     }
 }
 
@@ -244,8 +497,9 @@ internal static class AudioLevels
 /// <summary>
 /// Writes one track and keeps it on the shared wall clock: Windows sends no data while nothing is playing, so gaps
 /// are filled with silence to keep both tracks the same length and aligned in time.
-/// Audio is stored as 16-bit mono at the device's own rate (speech needs no more), which is up to 8x smaller than
+/// Audio is stored as 16-bit mono at the first device's rate (speech needs no more), which is up to 8x smaller than
 /// the 32-bit float stereo Windows delivers, and a new part file is started at 3 GB so a WAV file never hits 4 GB.
+/// A device switched to mid-recording that runs at another rate is resampled to the track's rate.
 /// </summary>
 internal sealed class TrackWriter : IDisposable
 {
@@ -256,9 +510,11 @@ internal sealed class TrackWriter : IDisposable
 
     private readonly string folder;
     private readonly string stem;
-    private readonly WaveFormat inputFormat;
+    private const int ResampleChunk = 4096;
+
+    private WaveFormat inputFormat;
     private readonly WaveFormat outputFormat;
-    private readonly bool inputIsFloat;
+    private bool inputIsFloat;
     private readonly Stopwatch clock;
     private readonly List<string> paths = new();
     private WaveFileWriter writer;
@@ -266,6 +522,11 @@ internal sealed class TrackWriter : IDisposable
     private long partBytesWritten;
     private TimeSpan lastFlush;
     private byte[] converted = Array.Empty<byte>();
+    private float[] monoSamples = Array.Empty<float>();
+    private BufferedWaveProvider? resampleInput;
+    private WdlResamplingSampleProvider? resampler;
+    private byte[] resampleBytes = Array.Empty<byte>();
+    private float[] resampledSamples = Array.Empty<float>();
 
     public TrackWriter(string folder, string stem, WaveFormat inputFormat, Stopwatch clock)
     {
@@ -274,9 +535,32 @@ internal sealed class TrackWriter : IDisposable
         this.inputFormat = inputFormat;
         this.clock = clock;
         outputFormat = new WaveFormat(inputFormat.SampleRate, 16, 1);
-        inputIsFloat = inputFormat.Encoding == WaveFormatEncoding.IeeeFloat
-                       || (inputFormat is WaveFormatExtensible extensible && extensible.SubFormat == IeeeFloatSubFormat);
+        inputIsFloat = IsFloat(inputFormat);
         writer = OpenPart(1);
+    }
+
+    private static bool IsFloat(WaveFormat format) =>
+        format.Encoding == WaveFormatEncoding.IeeeFloat
+        || (format is WaveFormatExtensible extensible && extensible.SubFormat == IeeeFloatSubFormat);
+
+    /// <summary>The device behind this track changed: read its format from now on, resampling if its rate differs.</summary>
+    public void ChangeInput(WaveFormat newFormat)
+    {
+        inputFormat = newFormat;
+        inputIsFloat = IsFloat(newFormat);
+        if (newFormat.SampleRate == outputFormat.SampleRate)
+        {
+            resampleInput = null;
+            resampler = null;
+            return;
+        }
+        resampleInput = new BufferedWaveProvider(WaveFormat.CreateIeeeFloatWaveFormat(newFormat.SampleRate, 1))
+        {
+            ReadFully = false,
+            DiscardOnBufferOverflow = true,
+            BufferDuration = TimeSpan.FromSeconds(5),
+        };
+        resampler = new WdlResamplingSampleProvider(resampleInput.ToSampleProvider(), outputFormat.SampleRate);
     }
 
     public IReadOnlyList<string> Paths => paths;
@@ -334,13 +618,35 @@ internal sealed class TrackWriter : IDisposable
     /// <summary>Averages the channels of each frame into one 16-bit sample. Returns the number of bytes produced.</summary>
     private int ConvertToMono16(byte[] buffer, int count)
     {
+        int frameCount = MixToMono(buffer, count);
+        float[] samples = monoSamples;
+        int sampleCount = frameCount;
+        if (resampler != null)
+        {
+            sampleCount = Resample(frameCount);
+            samples = resampledSamples;
+        }
+
+        int neededBytes = sampleCount * 2;
+        if (converted.Length < neededBytes) converted = new byte[neededBytes];
+        for (int index = 0; index < sampleCount; index++)
+        {
+            short value = (short)Math.Clamp(samples[index] * 32767f, -32768f, 32767f);
+            converted[index * 2] = (byte)value;
+            converted[index * 2 + 1] = (byte)(value >> 8);
+        }
+        return neededBytes;
+    }
+
+    /// <summary>Fills <see cref="monoSamples"/> with one sample per frame. Returns the number of frames.</summary>
+    private int MixToMono(byte[] buffer, int count)
+    {
         int channelCount = Math.Max(1, inputFormat.Channels);
         int bytesPerSample = inputFormat.BitsPerSample / 8;
         if (bytesPerSample == 0) return 0;
         int frameBytes = bytesPerSample * channelCount;
         int frameCount = count / frameBytes;
-        int neededBytes = frameCount * 2;
-        if (converted.Length < neededBytes) converted = new byte[neededBytes];
+        if (monoSamples.Length < frameCount) monoSamples = new float[frameCount];
 
         for (int frame = 0; frame < frameCount; frame++)
         {
@@ -349,11 +655,28 @@ internal sealed class TrackWriter : IDisposable
             {
                 sum += ReadSample(buffer, frame * frameBytes + channel * bytesPerSample, bytesPerSample);
             }
-            short value = (short)Math.Clamp(sum / channelCount * 32767f, -32768f, 32767f);
-            converted[frame * 2] = (byte)value;
-            converted[frame * 2 + 1] = (byte)(value >> 8);
+            monoSamples[frame] = sum / channelCount;
         }
-        return neededBytes;
+        return frameCount;
+    }
+
+    /// <summary>Feeds the mono samples through the resampler into <see cref="resampledSamples"/>. Returns how many came out.</summary>
+    private int Resample(int frameCount)
+    {
+        int byteCount = frameCount * sizeof(float);
+        if (resampleBytes.Length < byteCount) resampleBytes = new byte[byteCount];
+        Buffer.BlockCopy(monoSamples, 0, resampleBytes, 0, byteCount);
+        resampleInput!.AddSamples(resampleBytes, 0, byteCount);
+
+        int produced = 0;
+        for (int attempt = 0; attempt < 64; attempt++)
+        {
+            if (resampledSamples.Length < produced + ResampleChunk) Array.Resize(ref resampledSamples, produced + ResampleChunk);
+            int read = resampler!.Read(resampledSamples, produced, ResampleChunk);
+            if (read <= 0) break;
+            produced += read;
+        }
+        return produced;
     }
 
     private float ReadSample(byte[] buffer, int offset, int bytesPerSample) => bytesPerSample switch

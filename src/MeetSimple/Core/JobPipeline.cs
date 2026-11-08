@@ -10,6 +10,7 @@ namespace MeetSimple.Core;
 public sealed class JobPipeline
 {
     private const float SilenceThreshold = 0.003f;
+    private const double MinimumVoicedSeconds = 1.5;
 
     private readonly JobRequest request;
     private readonly Action<StepUpdate> report;
@@ -73,12 +74,15 @@ public sealed class JobPipeline
         var stopwatch = Stopwatch.StartNew();
         bool summarize = request.Mode == JobMode.TranscribeAndSummarize;
 
+        string? voiceDetectorPath = null;
+
         // Decide where the results go before hours of work, not after.
         var (outputFolder, folderNotice) = ChooseOutputFolder(request.OutputFolder);
 
         string modelPath = await RunStepAsync<string>("speech_model", async progress =>
         {
             var (path, alreadyPresent) = await SpeechModelStore.EnsureAsync(request.SpeechModel, progress, cancellationToken);
+            voiceDetectorPath = await SpeechModelStore.EnsureVoiceDetectorAsync(progress, cancellationToken);
             return (path, alreadyPresent ? "Ready" : "Downloaded");
         });
 
@@ -145,7 +149,11 @@ public sealed class JobPipeline
 
             var segments = await RunStepAsync<List<TranscriptSegment>>("transcribe", async progress =>
             {
-                var audible = preparedTracks.Where(item => item.Audio.Peak >= SilenceThreshold).ToList();
+                // A track with almost no sound (nobody else on the call, only the app's beeps) is not transcribed at all:
+                // Whisper would only invent lines for it ("Thank you.").
+                var audible = preparedTracks
+                    .Where(item => item.Audio.Peak >= SilenceThreshold && item.Audio.Speech.TotalVoicedSeconds >= MinimumVoicedSeconds)
+                    .ToList();
                 if (audible.Count == 0)
                 {
                     return (new List<TranscriptSegment>(), "No speech detected");
@@ -157,6 +165,7 @@ public sealed class JobPipeline
                 var options = new TranscriptionOptions(request.Language, request.Glossary, request.BestAccuracy);
 
                 var transcribeClock = Stopwatch.StartNew();
+                double OverallFraction(int trackIndex) => (double)trackIndex / audible.Count;
                 var perTrack = new List<IReadOnlyList<TranscriptSegment>>();
                 for (int index = 0; index < audible.Count; index++)
                 {
@@ -166,9 +175,26 @@ public sealed class JobPipeline
                         double overall = (trackIndex + fraction) / audible.Count;
                         progress.Report(new ProgressInfo(overall, DescribeProgress(overall, transcribeClock.Elapsed)));
                     });
+                    var audio = audible[index].Audio;
+
+                    // Whisper only hears the stretches where someone speaks: no silence to invent text over, and none
+                    // of the call app's beeps and chimes. Without the voice detector, the whole track is used as before.
+                    SpeechOnlyAudio? speechOnly = null;
+                    if (voiceDetectorPath != null)
+                    {
+                        progress.Report(new ProgressInfo(OverallFraction(trackIndex), "Finding speech..."));
+                        speechOnly = await VoiceDetector.ExtractSpeechAsync(
+                            voiceDetectorPath, audio.WavPath, Path.Combine(tempFolder, $"track{index}-speech.wav"), cancellationToken);
+                    }
+                    if (speechOnly != null && speechOnly.Duration < TimeSpan.FromSeconds(0.3))
+                    {
+                        perTrack.Add(new List<TranscriptSegment>()); // Nobody speaks on this track at all.
+                        continue;
+                    }
+
                     perTrack.Add(await engine.TranscribeAsync(
-                        audible[index].Audio.WavPath, audible[index].Speaker, options, audible[index].Audio.Duration,
-                        trackProgress, partialTranscript.Append, cancellationToken));
+                        speechOnly?.WavPath ?? audio.WavPath, audible[index].Speaker, options, speechOnly?.Duration ?? audio.Duration,
+                        audio.Speech, speechOnly?.Timeline, trackProgress, partialTranscript.Append, cancellationToken));
                 }
                 var merged = TextProcessing.MergeTracks(perTrack);
                 return (merged, $"{merged.Count} passages");

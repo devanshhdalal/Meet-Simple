@@ -24,6 +24,8 @@ public partial class TutorialWindow : Window, IDisposable
          "Speak, or play something, and watch the bars move. If a bar stays still, check your Windows sound settings and microphone privacy settings.\n\nTip: wear headphones so your microphone doesn't also pick up the other people from your speakers."),
         ("Choose how much you want",
          "Transcribe only is the fastest: you get the full text with timestamps.\n\nTranscribe + summarize also writes a short summary with just the important points, decisions and tasks. The first time, it sets up a local AI (several gigabytes) - you'll be asked before anything is downloaded."),
+        ("Never miss a call",
+         "When a call starts in Zoom, Teams, Meet or a similar app, Meet Simple asks at the top of the screen if you'd like to record it. Nothing is recorded unless you say yes.\n\nWhen the call ends, a notification lets you summarize it, transcribe it, or save it for later.\n\nWant it ready every time? Turn on Start with Windows in Settings."),
         ("You're ready",
          "Your results are saved in Documents > Meet Simple, next to the audio.\n\nOnly record calls when everyone on them agrees - rules differ by country and company."),
     };
@@ -94,7 +96,7 @@ public partial class TutorialWindow : Window, IDisposable
     private void StartMeters()
     {
         MetersPanel.Visibility = Visibility.Visible;
-        meterRecorder = new AudioRecorder();
+        meterRecorder = new AudioRecorder(AppSettings.Current.RecordMicrophoneId, AppSettings.Current.RecordComputerAudioId);
         meterRecorder.StartMonitoring();
         Meters.Attach(meterRecorder);
     }

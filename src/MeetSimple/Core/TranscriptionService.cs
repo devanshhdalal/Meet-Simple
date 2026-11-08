@@ -53,10 +53,13 @@ public sealed class TranscriptionEngine : IDisposable
             }
         }, cancellationToken);
 
-    /// <summary>Transcribes a 16 kHz mono WAV. Each recognised passage is also handed to onSegment as soon as it exists.</summary>
+    /// <summary>
+    /// Transcribes a 16 kHz mono WAV. Each recognised passage is also handed to onSegment as soon as it exists.
+    /// Passages with no voice under them (Whisper's inventions over silence) are left out; see TextProcessing.IsInventedText.
+    /// </summary>
     public Task<List<TranscriptSegment>> TranscribeAsync(
-        string wavPath, string? speaker, TranscriptionOptions options, TimeSpan totalDuration,
-        IProgress<double> progress, Action<TranscriptSegment>? onSegment, CancellationToken cancellationToken)
+        string wavPath, string? speaker, TranscriptionOptions options, TimeSpan totalDuration, SpeechMap? speech,
+        SpeechTimeline? timeline, IProgress<double> progress, Action<TranscriptSegment>? onSegment, CancellationToken cancellationToken)
     {
         return Task.Run(async () =>
         {
@@ -68,9 +71,15 @@ public sealed class TranscriptionEngine : IDisposable
             await foreach (var result in processor.ProcessAsync(wavStream, cancellationToken))
             {
                 string text = result.Text.Trim();
-                if (!TextProcessing.IsNoiseMarker(text))
+                // Times from the speech-only audio are mapped back onto the original recording.
+                TimeSpan start = timeline?.ToOriginal(result.Start) ?? result.Start;
+                TimeSpan end = timeline?.ToOriginal(result.End) ?? result.End;
+                double voicedFraction = speech?.VoicedFraction(start, end) ?? 1.0;
+                double loudSeconds = speech?.LoudSeconds(start, end) ?? double.MaxValue;
+                if (!TextProcessing.IsNoiseMarker(text)
+                    && !TextProcessing.IsInventedText(text, voicedFraction, loudSeconds, result.NoSpeechProbability))
                 {
-                    var segment = new TranscriptSegment(result.Start, result.End, speaker, text, NormalizeLanguage(result.Language));
+                    var segment = new TranscriptSegment(start, end, speaker, text, NormalizeLanguage(result.Language));
                     segments.Add(segment);
                     onSegment?.Invoke(segment);
                 }
@@ -116,7 +125,10 @@ public sealed class TranscriptionEngine : IDisposable
             .WithTemperatureInc(0.2f)
             .WithEntropyThreshold(2.4f)
             .WithLogProbThreshold(-1f)
-            .WithNoSpeechThreshold(0.6f);
+            .WithNoSpeechThreshold(0.6f)
+            // Not continuing from the previous sentence is what stops Whisper repeating itself after a pause
+            // (faster-whisper's condition_on_previous_text=False, the most-recommended hallucination fix).
+            .WithNoContext();
 
         string glossary = InputValidation.CleanGlossary(options.Glossary);
         if (glossary.Length > 0)
