@@ -3,7 +3,8 @@ namespace MeetSimple.Core;
 /// <summary>Map-reduce summary: condense each ~10-minute chunk, then merge the notes into one final summary.</summary>
 public static class SummaryService
 {
-    private const int MaxWordsBeforeFinalMerge = 3000;
+    // The final prompt must fit the 8192-token context with room for the answer.
+    private const int MaxTokensBeforeFinalMerge = 4000;
 
     private const string ChunkPrompt = """
         You are condensing one part ({0}) of a recording transcript. Lines may start with "You:" or "Others:" to show who spoke.
@@ -80,7 +81,7 @@ public static class SummaryService
             return "No important information was found in the recording.";
         }
 
-        while (notes.Count > 1 && WordCount(notes) > MaxWordsBeforeFinalMerge)
+        while (notes.Count > 1 && TokenCount(notes) > MaxTokensBeforeFinalMerge)
         {
             progress.Report(new ProgressInfo(null, "Condensing notes..."));
             var merged = new List<string>();
@@ -114,6 +115,5 @@ public static class SummaryService
         }
     }
 
-    private static int WordCount(IEnumerable<string> notes) =>
-        notes.Sum(note => note.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
+    private static int TokenCount(IEnumerable<string> notes) => notes.Sum(TextProcessing.EstimateTokens);
 }

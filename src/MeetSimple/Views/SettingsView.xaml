@@ -38,7 +38,7 @@
                     <ComboBox x:Name="AccuracyBox" HorizontalAlignment="Left" />
 
                     <TextBlock Text="Graphics card" FontWeight="SemiBold" Margin="0,22,0,0" />
-                    <TextBlock Text="Using the graphics card is faster. If transcribing ever crashes, choose processor only. Applies the next time you open Meet Simple."
+                    <TextBlock Text="Using the graphics card is faster. If transcribing ever crashes, choose processor only. Changing this needs a quick restart of Meet Simple."
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" TextWrapping="Wrap" />
                     <ComboBox x:Name="GraphicsBox" HorizontalAlignment="Left" />
 
@@ -54,9 +54,9 @@
                     <ComboBox x:Name="SummaryModelBox" HorizontalAlignment="Left" />
 
                     <TextBlock Text="Language" FontWeight="SemiBold" Margin="0,22,0,0" />
-                    <TextBlock Text="Leave empty to detect automatically. Or enter a code such as en, es, fr, de."
+                    <TextBlock Text="The language that is spoken. Choosing it is a little more accurate than detecting it."
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
-                    <TextBox x:Name="LanguageBox" Width="120" HorizontalAlignment="Left" />
+                    <ComboBox x:Name="LanguageBox" HorizontalAlignment="Left" MinWidth="220" MaxDropDownHeight="320" />
 
                     <Button Content="Open my recordings folder" Style="{StaticResource QuietButton}"
                             HorizontalAlignment="Left" Margin="0,26,0,0" Click="OnOpenFolderClick" />

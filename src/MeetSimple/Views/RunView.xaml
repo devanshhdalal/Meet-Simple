@@ -32,7 +32,7 @@
         <Grid Grid.Row="5" Margin="0,16,0,0">
             <StackPanel VerticalAlignment="Center">
                 <TextBlock x:Name="MessageText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"
-                           Text="You can leave this running. Longer recordings take a while." />
+                           Text="Feel free to look around: the progress stays at the bottom of the window. Longer recordings take a while." />
                 <TextBlock x:Name="ElapsedText" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" />
             </StackPanel>
             <StackPanel x:Name="ButtonBar" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">

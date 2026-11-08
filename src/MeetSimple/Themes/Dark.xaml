@@ -22,4 +22,12 @@
     <SolidColorBrush x:Key="SidebarHoverBrush" Color="#1FFFFFFF" />
     <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#33FFFFFF" />
     <SolidColorBrush x:Key="SidebarPillBrush" Color="#1AFFFFFF" />
+    <!-- Activity island (job progress pill): always near-black, like the hardware it is modelled on -->
+    <SolidColorBrush x:Key="IslandBrush" Color="#0C0C0F" />
+    <SolidColorBrush x:Key="IslandLineBrush" Color="#33FFFFFF" />
+    <SolidColorBrush x:Key="IslandTextBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="IslandMutedBrush" Color="#A1A1AA" />
+    <SolidColorBrush x:Key="IslandTrackBrush" Color="#2E2E33" />
+    <SolidColorBrush x:Key="IslandSuccessBrush" Color="#30D158" />
+    <SolidColorBrush x:Key="IslandErrorBrush" Color="#FF453A" />
 </ResourceDictionary>

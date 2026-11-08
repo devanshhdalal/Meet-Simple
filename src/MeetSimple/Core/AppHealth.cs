@@ -148,9 +148,28 @@ public static class AppHealth
 
     // ----- leftovers -----
 
-    /// <summary>Removes work folders (converted audio, installers) left behind by a crash or a killed process.</summary>
+    /// <summary>
+    /// Removes work folders (converted audio, installers) left behind by a crash or a killed process, and transcript
+    /// safety copies older than 30 days (they are only needed right after a failed job).
+    /// </summary>
     public static void CleanOldTempFolders()
     {
+        try
+        {
+            string inProgressFolder = Path.Combine(DataFolder, "in-progress");
+            if (Directory.Exists(inProgressFolder))
+            {
+                foreach (string file in Directory.EnumerateFiles(inProgressFolder, "*.txt"))
+                {
+                    if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > TimeSpan.FromDays(30)) File.Delete(file);
+                }
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Try again next start.
+        }
+
         try
         {
             if (!Directory.Exists(TempRoot)) return;

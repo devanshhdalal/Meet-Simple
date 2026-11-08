@@ -11,10 +11,6 @@ public static class InputValidation
     private static readonly Regex ModelNamePattern = new(
         @"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,80}(:[A-Za-z0-9._\-]{1,40})?$", RegexOptions.Compiled, MatchTimeout);
 
-    // e.g. "en", "pt", "zh-CN"
-    private static readonly Regex LanguagePattern = new(
-        @"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$", RegexOptions.Compiled, MatchTimeout);
-
     public static bool IsValidModelName(string? value) =>
         !string.IsNullOrEmpty(value) && !value.Contains("..") && ModelNamePattern.IsMatch(value);
 
@@ -26,9 +22,6 @@ public static class InputValidation
         if (cleaned.Length > 100) cleaned = cleaned[..100].TrimEnd(' ', '.');
         return cleaned.Length == 0 ? "meeting" : cleaned;
     }
-
-    public static bool IsValidLanguage(string? value) =>
-        string.IsNullOrEmpty(value) || LanguagePattern.IsMatch(value);
 
     public const int MaxGlossaryLength = 400;
 

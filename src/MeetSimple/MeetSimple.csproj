@@ -47,9 +47,11 @@
     <Using Include="System.Net.Http" />
   </ItemGroup>
 
-  <!-- SF Pro Display only (Regular / Medium / Bold). -->
+  <!-- Inter (Regular / Medium / SemiBold / Bold) and Inter Display Bold, embedded. The OFL licence must ship with the fonts. -->
   <ItemGroup>
-    <Resource Include="Fonts\*.otf" />
+    <Resource Include="Fonts\*.ttf" />
+    <None Include="Fonts\OFL.txt" Link="Licenses\Inter-OFL.txt" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
   <ItemGroup>

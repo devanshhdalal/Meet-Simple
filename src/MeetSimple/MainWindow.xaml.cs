@@ -8,8 +8,15 @@ using MeetSimple.Views;
 
 namespace MeetSimple;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
+    Justification = "The job is disposed in ClearJob; a window's lifetime ends with Closed, not Dispose.")]
 public partial class MainWindow : Window
 {
+    /// <summary>Room kept free at the bottom of the card while the activity island is showing.</summary>
+    private const double IslandClearance = 76.0;
+
+    private JobSession? activeJob;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -18,6 +25,7 @@ public partial class MainWindow : Window
         SpaceManager.Transition = PlayThemeTransition;
         ThemeManager.ThemeChanged += OnThemeOrSpaceChromeChanged;
         SpaceManager.SpaceChanged += OnThemeOrSpaceChromeChanged;
+        Island.Activated += OnIslandActivated;
         UpdateThemeToggle();
         RebuildSpaceDots();
         Loaded += OnLoaded;
@@ -34,13 +42,18 @@ public partial class MainWindow : Window
         ShowHome();
     }
 
+    /// <summary>True while a transcription or summary is running (other screens can still be viewed).</summary>
+    public bool IsJobRunning => activeJob?.Status == JobStatus.Running;
+
+    private bool IsRecording => Host.Content is RecordView { IsRecording: true };
+
     private void OnThemeOrSpaceChromeChanged()
     {
         UpdateThemeToggle();
         RebuildSpaceDots();
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Motion.FadeIn(RootGrid, Motion.Gentle);
 
@@ -57,34 +70,79 @@ public partial class MainWindow : Window
                 "Meet Simple closed unexpectedly while transcribing with the graphics card, so it now uses the processor only. "
                 + "Transcribing will be slower but more reliable. You can turn the graphics card back on in Settings.");
         }
+
+        await OfferUnfinishedRecordingAsync();
+    }
+
+    /// <summary>A recording that was cut off (window closed, crash, power cut) is offered for transcription once.</summary>
+    private async Task OfferUnfinishedRecordingAsync()
+    {
+        var unfinished = await Task.Run(RecordingRecovery.FindLatest);
+        if (unfinished == null || activeJob != null) return;
+
+        string when = unfinished.StartedAt.ToString("dddd d MMMM 'at' HH:mm");
+        int minutes = Math.Max(1, (int)Math.Round(unfinished.Duration.TotalMinutes));
+        bool transcribe = AppDialog.Confirm(this, "A recording is waiting",
+            $"Your recording from {when} ({minutes} min) was saved but never transcribed, "
+            + "probably because Meet Simple closed while it was recording.\n\nTranscribe it now? "
+            + "If you cancel, the audio stays in your Recordings folder.");
+        if (!transcribe)
+        {
+            RecordingRecovery.Clear(unfinished.Folder);
+            return;
+        }
+        var request = CreateRequest(unfinished.Mode, unfinished.Tracks, unfinished.Folder, "Meeting", unfinished.Folder);
+        await StartJobAsync(request);
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (!IsBusy) return;
-        if (!AppDialog.Confirm(this, "Meet Simple", "Something is still running. Stop it and exit?"))
+        if (IsRecording)
         {
-            e.Cancel = true;
-            return;
+            if (!AppDialog.Confirm(this, "Stop recording and exit?",
+                    "The recording so far will be saved, and Meet Simple will offer to transcribe it the next time you open it."))
+            {
+                e.Cancel = true;
+                return;
+            }
+            // Disposing the screen stops the recorder, which finishes the audio files properly.
+            (Host.Content as IDisposable)?.Dispose();
+            Host.Content = null;
         }
-        (Host.Content as RunView)?.Cancel();
+        else if (IsJobRunning)
+        {
+            if (!AppDialog.Confirm(this, "Meet Simple", "A transcription is still running. Stop it and exit?"))
+            {
+                e.Cancel = true;
+                return;
+            }
+            activeJob?.Cancel();
+        }
         // Exiting on purpose must not look like a graphics-card crash at the next start.
         AppHealth.ClearGpuAttempt();
     }
 
-    private bool IsBusy =>
-        Host.Content is RunView { IsRunning: true } || Host.Content is RecordView { IsRecording: true };
-
     // ----- navigation -----
-    private void Navigate(UserControl view)
+    private void Navigate(UserControl view, bool openedFromIsland = false)
     {
-        // The old screen fades away while the new one eases in, so a screen change is never a sudden jump.
         bool animate = Motion.Enabled && IsLoaded && Host.Content != null;
+        // Leaving the progress screen while the job still matters: the page shrinks into the island instead of fading.
+        bool tuckIntoIsland = Host.Content is RunView && view is not RunView && activeJob != null && !openedFromIsland;
         var snapshot = animate ? Motion.Capture(Host, (Brush)FindResource("BackgroundBrush")) : null;
 
         (Host.Content as IDisposable)?.Dispose();
         Host.Content = view;
         UpdateNavSelection();
+
+        if (tuckIntoIsland)
+        {
+            RefreshIslandContent();
+            Island.ShrinkFrom(snapshot);
+            UpdateHostClearance();
+            Motion.RiseIn(view);
+            return;
+        }
+        RefreshIsland();
 
         if (snapshot == null) return;
         PageSnapshot.Source = snapshot;
@@ -95,6 +153,105 @@ public partial class MainWindow : Window
             PageSnapshot.Source = null;
         });
         Motion.RiseIn(view);
+    }
+
+    // ----- activity island -----
+
+    private void RefreshIsland()
+    {
+        bool shouldShow = activeJob != null && activeJob.Status != JobStatus.Cancelled && Host.Content is not RunView;
+        if (shouldShow && !Island.IsShown)
+        {
+            RefreshIslandContent();
+            Island.PopIn();
+        }
+        else if (!shouldShow && Island.IsShown)
+        {
+            Island.PopOut();
+        }
+        UpdateHostClearance();
+    }
+
+    private void UpdateHostClearance() =>
+        Host.Margin = new Thickness(0, 0, 0, Island.IsShown ? IslandClearance : 0);
+
+    private void RefreshIslandContent()
+    {
+        var job = activeJob;
+        if (job == null) return;
+        bool summarizing = job.Request.Mode == JobMode.TranscribeAndSummarize;
+        switch (job.Status)
+        {
+            case JobStatus.Succeeded:
+                bool hasSummary = job.Result?.SummaryPath != null;
+                Island.Update(IslandState.Done, hasSummary ? "Summary ready" : "Transcript ready", "Click to open", 1.0);
+                break;
+            case JobStatus.Failed:
+                Island.Update(IslandState.Failed, "Couldn't finish", "Click to see what happened", job.OverallFraction);
+                break;
+            case JobStatus.Running:
+                string verb = summarizing ? "Transcribe + summarize" : "Transcribing";
+                Island.Update(IslandState.Working, $"{verb} · {job.ActiveStepTitle}", job.StatusLabel, job.OverallFraction);
+                break;
+        }
+    }
+
+    private void OnIslandActivated()
+    {
+        var job = activeJob;
+        if (job == null) return;
+        if (ShowBusyNotice()) return;
+
+        Island.ExpandAway();
+        if (job.Status == JobStatus.Succeeded && job.Result is { } result)
+        {
+            ClearJob();
+            Navigate(new ResultView(this, result), openedFromIsland: true);
+        }
+        else
+        {
+            Navigate(new RunView(this, job), openedFromIsland: true);
+        }
+        UpdateHostClearance();
+    }
+
+    // ----- jobs -----
+
+    private void OnJobStepChanged(StepUpdate update) => RefreshIslandContent();
+
+    private void OnJobFinished()
+    {
+        var job = activeJob;
+        if (job == null) return;
+        RefreshIslandContent();
+
+        if (job.Status == JobStatus.Succeeded && Host.Content is RunView && job.Result is { } result)
+        {
+            ClearJob();
+            ShowResult(result);
+        }
+        else if (job.Status == JobStatus.Cancelled)
+        {
+            ClearJob();
+            if (Host.Content is RunView) ShowHome(); else RefreshIsland();
+        }
+        // A success seen from another screen, or a failure, stays in the island until it is opened.
+    }
+
+    /// <summary>Forgets the current job (finished, failed and acknowledged, or replaced by a new one).</summary>
+    public void DismissJob()
+    {
+        ClearJob();
+        RefreshIsland();
+    }
+
+    private void ClearJob()
+    {
+        if (activeJob == null) return;
+        activeJob.StepChanged -= OnJobStepChanged;
+        activeJob.Finished -= OnJobFinished;
+        activeJob.Dispose();
+        activeJob = null;
     }
 
     // ----- theme -----
@@ -121,8 +278,9 @@ public partial class MainWindow : Window
     private void UpdateThemeToggle()
     {
         // Shows the icon of the mode you would switch to: a moon in light mode, a sun in dark mode.
-        ThemeToggle.Content = ThemeManager.IsDark ? "\uE706" : "\uE708";
+        ThemeToggle.Content = ThemeManager.IsDark ? "" : "";
         ThemeToggle.ToolTip = ThemeManager.IsDark ? "Switch to light mode" : "Switch to dark mode";
+        System.Windows.Automation.AutomationProperties.SetName(ThemeToggle, (string)ThemeToggle.ToolTip);
     }
 
     private void OnThemeToggleClick(object sender, RoutedEventArgs e) =>
@@ -141,7 +299,7 @@ public partial class MainWindow : Window
         bool maximized = WindowState == WindowState.Maximized;
         // A maximised window with a custom frame extends past the screen edge by the resize border, so pull the content back in.
         RootGrid.Margin = maximized ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
-        MaximizeButton.Content = maximized ? "\uE923" : "\uE922";
+        MaximizeButton.Content = maximized ? "" : "";
         MaximizeButton.ToolTip = maximized ? "Restore" : "Maximize";
     }
 
@@ -177,6 +335,7 @@ public partial class MainWindow : Window
                 IsChecked = spaceId == SpaceManager.Current.Id,
                 Margin = new Thickness(0, 0, 4, 0),
             };
+            System.Windows.Automation.AutomationProperties.SetName(dot, space.Label + " space");
             dot.Click += (_, _) => SpaceManager.SetSpace(spaceId);
             host.Children.Add(dot);
         }
@@ -188,11 +347,11 @@ public partial class MainWindow : Window
         NavSettings.IsChecked = Host.Content is SettingsView;
     }
 
-    /// <summary>Returns true (after telling the user) when a job is running and navigation should wait.</summary>
+    /// <summary>Recording owns this screen (leaving it would stop the recording), so navigation waits for Stop.</summary>
     private bool ShowBusyNotice()
     {
-        if (!IsBusy) return false;
-        AppDialog.Notice(this, "Meet Simple", "Please wait until the current job has finished.");
+        if (!IsRecording) return false;
+        AppDialog.Notice(this, "Meet Simple", "Please stop the recording first.");
         UpdateNavSelection();
         return true;
     }
@@ -222,14 +381,37 @@ public partial class MainWindow : Window
         ShowSource(JobMode.TranscribeAndSummarize);
     }
 
-    private void OnPinnedFolderClick(object sender, RoutedEventArgs e)
+    private void OnPinnedFolderClick(object sender, RoutedEventArgs e) => OpenRecordingsFolder();
+
+    public static void OpenRecordingsFolder()
     {
-        Directory.CreateDirectory(AppSettings.RecordingsRoot);
-        Process.Start(new ProcessStartInfo(AppSettings.RecordingsRoot) { UseShellExecute = true });
+        try
+        {
+            Directory.CreateDirectory(AppSettings.RecordingsRoot);
+            Process.Start(new ProcessStartInfo(AppSettings.RecordingsRoot) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            AppDialog.Notice(Application.Current.MainWindow, "Meet Simple", "The recordings folder could not be opened: " + error.Message);
+        }
     }
 
     public void ShowHome() => Navigate(new HomeView(this));
-    public void ShowSource(JobMode mode) => Navigate(new SourceView(this, mode));
+
+    /// <summary>Starting something new waits for the running job; looking around (Home, Settings, tour) does not.</summary>
+    public void ShowSource(JobMode mode)
+    {
+        if (IsJobRunning)
+        {
+            AppDialog.Notice(this, "One thing at a time",
+                "A transcription is running. You can look around while it works and start something new once it has finished. "
+                + "Its progress is at the bottom of the window.");
+            UpdateNavSelection();
+            return;
+        }
+        Navigate(new SourceView(this, mode));
+    }
+
     public void ShowRecord(JobMode mode) => Navigate(new RecordView(this, mode));
     public void ShowSettings() => Navigate(new SettingsView(this));
     public void ShowResult(JobResult result) => Navigate(new ResultView(this, result));
@@ -254,7 +436,8 @@ public partial class MainWindow : Window
     }
 
     // ----- starting jobs -----
-    public JobRequest CreateRequest(JobMode mode, IReadOnlyList<AudioTrack> tracks, string outputFolder, string baseName)
+    public JobRequest CreateRequest(JobMode mode, IReadOnlyList<AudioTrack> tracks, string outputFolder, string baseName,
+        string? recoveryFolder = null)
     {
         var settings = AppSettings.Current;
         return new JobRequest
@@ -268,36 +451,62 @@ public partial class MainWindow : Window
             Language = string.IsNullOrWhiteSpace(settings.Language) ? null : settings.Language,
             Glossary = string.IsNullOrWhiteSpace(settings.Glossary) ? null : settings.Glossary,
             BestAccuracy = settings.BestAccuracy,
+            RecoveryFolder = recoveryFolder,
         };
     }
 
-    /// <summary>Asks before any large one-time download, then starts the job. Returns false if the user declined.</summary>
+    /// <summary>Asks before any large one-time download, then starts the job. Returns false if it did not start.</summary>
     public async Task<bool> StartJobAsync(JobRequest request)
     {
-        if (!await ConfirmSetupAsync(request.Mode, request.SummaryModel))
+        if (IsJobRunning)
+        {
+            AppDialog.Notice(this, "One thing at a time", "Please wait until the current transcription has finished.");
+            return false;
+        }
+        if (!await ConfirmDownloadsAsync(request))
         {
             return false;
         }
-        Navigate(new RunView(this, request));
+
+        ClearJob(); // A finished or failed earlier job that was never opened is replaced.
+        var job = new JobSession(request);
+        activeJob = job;
+        job.StepChanged += OnJobStepChanged;
+        job.Finished += OnJobFinished;
+        job.Start();
+        Navigate(new RunView(this, job));
         return true;
     }
 
-    private async Task<bool> ConfirmSetupAsync(JobMode mode, string summaryModel)
+    /// <summary>
+    /// Lists everything this job would download for the first time - the speech model too, which can be 3 GB - and asks.
+    /// Whether the summary AI is already installed is read from Ollama's files when its server is not running yet.
+    /// </summary>
+    private async Task<bool> ConfirmDownloadsAsync(JobRequest request)
     {
-        if (mode != JobMode.TranscribeAndSummarize) return true;
-
-        var installedModels = await OllamaClient.TryListModelsAsync();
-        bool serverRunning = installedModels != null;
-        bool needsOllama = !serverRunning && OllamaSetup.FindExecutable() == null;
-        bool needsModel = needsOllama || (serverRunning && !OllamaClient.IsInstalled(installedModels!, summaryModel));
-        if (!needsOllama && !needsModel) return true;
-
         var items = new List<string>();
-        if (needsOllama) items.Add("  •  Ollama, the engine that runs the AI (about 1-2 GB)");
-        if (needsModel) items.Add($"  •  The AI model \"{summaryModel}\" (see its size in Settings)");
+        if (!File.Exists(SpeechModelStore.PathFor(request.SpeechModel)))
+        {
+            items.Add($"  •  Speech recognition: {Catalog.LabelFor(Catalog.SpeechModels, request.SpeechModel)}");
+        }
 
-        return AppDialog.Confirm(this, "One-time setup",
-            "To write summaries privately on this computer, the following will be downloaded and set up once:\n\n"
+        if (request.Mode == JobMode.TranscribeAndSummarize)
+        {
+            var installedModels = await OllamaClient.TryListModelsAsync();
+            bool serverRunning = installedModels != null;
+            bool needsOllama = !serverRunning && OllamaSetup.FindExecutable() == null;
+            bool needsModel = needsOllama
+                              || (serverRunning
+                                  ? !OllamaClient.IsInstalled(installedModels!, request.SummaryModel)
+                                  : !OllamaClient.IsInstalledOnDisk(request.SummaryModel));
+            if (needsOllama) items.Add("  •  Ollama, the engine that runs the summary AI (about 1-2 GB)");
+            if (needsModel) items.Add($"  •  Summary AI: {Catalog.LabelFor(Catalog.SummaryModels, request.SummaryModel)}");
+        }
+
+        if (items.Count == 0) return true;
+        return AppDialog.Confirm(this, "One-time download",
+            "Meet Simple needs to download the following once. After that it works offline, "
+            + "and nothing you record ever leaves this computer:\n\n"
             + string.Join("\n", items) + "\n\nContinue?");
     }
 }

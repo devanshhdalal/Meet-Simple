@@ -6,8 +6,9 @@ namespace MeetSimple.Core;
 
 public sealed class RecordingResult
 {
-    public string? MicrophonePath { get; init; }
-    public string? ComputerAudioPath { get; init; }
+    /// <summary>One or more part files; a new part starts long before a WAV file's 4 GB limit.</summary>
+    public IReadOnlyList<string>? MicrophonePaths { get; init; }
+    public IReadOnlyList<string>? ComputerAudioPaths { get; init; }
     public TimeSpan Duration { get; init; }
 }
 
@@ -83,11 +84,11 @@ public sealed class AudioRecorder : IDisposable
             clock = Stopwatch.StartNew();
             if (microphoneCapture != null)
             {
-                microphoneWriter = new TrackWriter(Path.Combine(folder, "microphone.wav"), microphoneCapture.WaveFormat, clock);
+                microphoneWriter = new TrackWriter(folder, "microphone", microphoneCapture.WaveFormat, clock);
             }
             if (computerCapture != null)
             {
-                computerWriter = new TrackWriter(Path.Combine(folder, "computer-audio.wav"), computerCapture.WaveFormat, clock);
+                computerWriter = new TrackWriter(folder, "computer-audio", computerCapture.WaveFormat, clock);
             }
             IsRecording = true;
         }
@@ -98,16 +99,16 @@ public sealed class AudioRecorder : IDisposable
         lock (gate)
         {
             finalDuration = clock?.Elapsed ?? TimeSpan.Zero;
-            string? microphonePath = FinishSafely(microphoneWriter);
-            string? computerPath = FinishSafely(computerWriter);
+            var microphonePaths = FinishSafely(microphoneWriter);
+            var computerPaths = FinishSafely(computerWriter);
             microphoneWriter = null;
             computerWriter = null;
             IsRecording = false;
             clock?.Stop();
             return new RecordingResult
             {
-                MicrophonePath = microphonePath,
-                ComputerAudioPath = computerPath,
+                MicrophonePaths = microphonePaths,
+                ComputerAudioPaths = computerPaths,
                 Duration = finalDuration,
             };
         }
@@ -147,7 +148,8 @@ public sealed class AudioRecorder : IDisposable
             {
                 writer.Write(data.Buffer, data.BytesRecorded);
             }
-            catch (Exception error) when (error is IOException or ObjectDisposedException or UnauthorizedAccessException)
+            // ArgumentException is NAudio's "WAV file too large"; parts make it unreachable, but it must never end the app.
+            catch (Exception error) when (error is IOException or ObjectDisposedException or UnauthorizedAccessException or ArgumentException)
             {
                 try
                 {
@@ -184,16 +186,16 @@ public sealed class AudioRecorder : IDisposable
                               + "Anything else keeps recording.");
     }
 
-    private static string? FinishSafely(TrackWriter? writer)
+    private static IReadOnlyList<string>? FinishSafely(TrackWriter? writer)
     {
         if (writer == null) return null;
         try
         {
             return writer.Finish();
         }
-        catch (IOException)
+        catch (Exception error) when (error is IOException or ArgumentException or ObjectDisposedException)
         {
-            return writer.FilePath; // Keep whatever reached the disk rather than losing the path.
+            return writer.Paths; // Keep whatever reached the disk rather than losing the files.
         }
     }
 
@@ -240,36 +242,52 @@ internal static class AudioLevels
 }
 
 /// <summary>
-/// Writes one WAV track and keeps it on the shared wall clock: Windows sends no data while nothing is playing,
-/// so gaps are filled with silence to keep both tracks the same length and aligned in time.
+/// Writes one track and keeps it on the shared wall clock: Windows sends no data while nothing is playing, so gaps
+/// are filled with silence to keep both tracks the same length and aligned in time.
+/// Audio is stored as 16-bit mono at the device's own rate (speech needs no more), which is up to 8x smaller than
+/// the 32-bit float stereo Windows delivers, and a new part file is started at 3 GB so a WAV file never hits 4 GB.
 /// </summary>
 internal sealed class TrackWriter : IDisposable
 {
-    private readonly WaveFileWriter writer;
-    private readonly Stopwatch clock;
-    private readonly WaveFormat format;
-    private long bytesWritten;
-    private TimeSpan lastFlush;
-
-    // Flushing refreshes the WAV header, so a crash or power cut loses seconds of audio instead of the whole file.
+    internal const long MaxPartBytes = 3L * 1024 * 1024 * 1024;
+    private static readonly Guid IeeeFloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
     private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(10);
+    private static readonly byte[] Silence = new byte[64 * 1024];
 
-    public TrackWriter(string filePath, WaveFormat format, Stopwatch clock)
+    private readonly string folder;
+    private readonly string stem;
+    private readonly WaveFormat inputFormat;
+    private readonly WaveFormat outputFormat;
+    private readonly bool inputIsFloat;
+    private readonly Stopwatch clock;
+    private readonly List<string> paths = new();
+    private WaveFileWriter writer;
+    private long totalBytesWritten;
+    private long partBytesWritten;
+    private TimeSpan lastFlush;
+    private byte[] converted = Array.Empty<byte>();
+
+    public TrackWriter(string folder, string stem, WaveFormat inputFormat, Stopwatch clock)
     {
-        FilePath = filePath;
-        this.format = format;
+        this.folder = folder;
+        this.stem = stem;
+        this.inputFormat = inputFormat;
         this.clock = clock;
-        writer = new WaveFileWriter(filePath, format);
+        outputFormat = new WaveFormat(inputFormat.SampleRate, 16, 1);
+        inputIsFloat = inputFormat.Encoding == WaveFormatEncoding.IeeeFloat
+                       || (inputFormat is WaveFormatExtensible extensible && extensible.SubFormat == IeeeFloatSubFormat);
+        writer = OpenPart(1);
     }
 
-    public string FilePath { get; }
+    public IReadOnlyList<string> Paths => paths;
 
     public void Write(byte[] buffer, int count)
     {
-        long expectedBytesBeforeChunk = ExpectedBytesNow() - count;
-        PadWithSilence(expectedBytesBeforeChunk, minimumGapSeconds: 0.25);
-        writer.Write(buffer, 0, count);
-        bytesWritten += count;
+        int convertedBytes = ConvertToMono16(buffer, count);
+        PadWithSilence(ExpectedBytesNow() - convertedBytes, minimumGapSeconds: 0.25);
+        WriteBytes(converted, convertedBytes);
+
+        // Flushing rewrites the WAV header, so a crash or power cut loses seconds of audio instead of the whole file.
         if (clock.Elapsed - lastFlush > FlushInterval)
         {
             writer.Flush();
@@ -277,33 +295,92 @@ internal sealed class TrackWriter : IDisposable
         }
     }
 
-    public string Finish()
+    public IReadOnlyList<string> Finish()
     {
         PadWithSilence(ExpectedBytesNow(), minimumGapSeconds: 0.0);
         Dispose();
-        return FilePath;
+        return paths;
     }
 
     public void Dispose() => writer.Dispose();
 
+    private WaveFileWriter OpenPart(int partNumber)
+    {
+        string path = RecordingRecovery.PartPath(folder, stem, partNumber);
+        paths.Add(path);
+        partBytesWritten = 0;
+        return new WaveFileWriter(path, outputFormat);
+    }
+
+    private void WriteBytes(byte[] data, int count)
+    {
+        int offset = 0;
+        while (count > 0)
+        {
+            if (partBytesWritten >= MaxPartBytes)
+            {
+                writer.Dispose();
+                writer = OpenPart(paths.Count + 1);
+            }
+            int chunk = (int)Math.Min(count, MaxPartBytes - partBytesWritten);
+            writer.Write(data, offset, chunk);
+            offset += chunk;
+            count -= chunk;
+            partBytesWritten += chunk;
+            totalBytesWritten += chunk;
+        }
+    }
+
+    /// <summary>Averages the channels of each frame into one 16-bit sample. Returns the number of bytes produced.</summary>
+    private int ConvertToMono16(byte[] buffer, int count)
+    {
+        int channelCount = Math.Max(1, inputFormat.Channels);
+        int bytesPerSample = inputFormat.BitsPerSample / 8;
+        if (bytesPerSample == 0) return 0;
+        int frameBytes = bytesPerSample * channelCount;
+        int frameCount = count / frameBytes;
+        int neededBytes = frameCount * 2;
+        if (converted.Length < neededBytes) converted = new byte[neededBytes];
+
+        for (int frame = 0; frame < frameCount; frame++)
+        {
+            float sum = 0f;
+            for (int channel = 0; channel < channelCount; channel++)
+            {
+                sum += ReadSample(buffer, frame * frameBytes + channel * bytesPerSample, bytesPerSample);
+            }
+            short value = (short)Math.Clamp(sum / channelCount * 32767f, -32768f, 32767f);
+            converted[frame * 2] = (byte)value;
+            converted[frame * 2 + 1] = (byte)(value >> 8);
+        }
+        return neededBytes;
+    }
+
+    private float ReadSample(byte[] buffer, int offset, int bytesPerSample) => bytesPerSample switch
+    {
+        4 when inputIsFloat => BitConverter.ToSingle(buffer, offset),
+        4 => BitConverter.ToInt32(buffer, offset) / 2147483648f,
+        3 => (((buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16)) << 8) >> 8) / 8388608f,
+        2 => BitConverter.ToInt16(buffer, offset) / 32768f,
+        1 => (buffer[offset] - 128) / 128f,
+        _ => 0f,
+    };
+
     private long ExpectedBytesNow()
     {
-        long bytes = (long)(clock.Elapsed.TotalSeconds * format.AverageBytesPerSecond);
-        return bytes - (bytes % format.BlockAlign);
+        long bytes = (long)(clock.Elapsed.TotalSeconds * outputFormat.AverageBytesPerSecond);
+        return bytes - (bytes % outputFormat.BlockAlign);
     }
 
     private void PadWithSilence(long targetBytes, double minimumGapSeconds)
     {
-        long gap = targetBytes - bytesWritten;
-        if (gap <= format.AverageBytesPerSecond * minimumGapSeconds) return;
-        gap -= gap % format.BlockAlign;
-
-        var silence = new byte[64 * 1024 - (64 * 1024 % format.BlockAlign)];
+        long gap = targetBytes - totalBytesWritten;
+        if (gap <= outputFormat.AverageBytesPerSecond * minimumGapSeconds) return;
+        gap -= gap % outputFormat.BlockAlign;
         while (gap > 0)
         {
-            int chunk = (int)Math.Min(gap, silence.Length);
-            writer.Write(silence, 0, chunk);
-            bytesWritten += chunk;
+            int chunk = (int)Math.Min(gap, Silence.Length);
+            WriteBytes(Silence, chunk);
             gap -= chunk;
         }
     }

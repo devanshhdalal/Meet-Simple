@@ -19,16 +19,48 @@ if errorlevel 1 (
 )
 
 rem A running copy locks publish files and makes publish fail with MSB3027.
+rem taskkill returns before Windows releases the files, so wait (up to 15 s) until the process is really gone.
 tasklist /FI "IMAGENAME eq MeetSimple.exe" 2>nul | find /I "MeetSimple.exe" >nul
-if not errorlevel 1 (
-  echo Closing running Meet Simple so publish files can be overwritten...
-  taskkill /IM MeetSimple.exe /F >nul 2>&1
-  timeout /t 1 /nobreak >nul
-)
+if errorlevel 1 goto :app_closed
+echo Closing running Meet Simple so publish files can be overwritten...
+taskkill /IM MeetSimple.exe /F >nul 2>&1
+set /a close_wait_seconds=0
+:wait_for_app_exit
+tasklist /FI "IMAGENAME eq MeetSimple.exe" 2>nul | find /I "MeetSimple.exe" >nul
+if errorlevel 1 goto :app_closed
+set /a close_wait_seconds+=1
+if %close_wait_seconds% geq 15 goto :app_closed
+timeout /t 1 /nobreak >nul
+goto :wait_for_app_exit
+:app_closed
 
+rem Old files must never end up in the zip, so the output is deleted for real (retrying while Windows lets go of it).
+rem The folder itself can stay locked by a terminal or File Explorer window open inside it even when every file is
+rem gone; an empty folder is just as clean, so only leftover files count as a failure.
 echo Cleaning previous publish output...
-if exist "publish" rmdir /s /q "publish"
-mkdir publish
+set /a clean_attempts=0
+:clean_publish
+if exist "publish" rmdir /s /q "publish" 2>nul
+if not exist "publish" goto :publish_clean
+dir /b /a "publish" 2>nul | findstr "^" >nul
+if errorlevel 1 goto :publish_clean
+set /a clean_attempts+=1
+if %clean_attempts% geq 5 (
+  echo.
+  echo Could not delete the old files in the publish folder. Close anything using them ^(for example Meet Simple^)
+  echo and run build\build.bat again.
+  goto :fail
+)
+timeout /t 2 /nobreak >nul
+goto :clean_publish
+:publish_clean
+if not exist "publish" mkdir publish
+
+rem A shareable build always starts from scratch: an interrupted earlier build can leave WPF's intermediate files
+rem half-written (error BG1002 "...baml cannot be found"), and incremental builds would trust them.
+echo Clearing intermediate build files...
+if exist "src\MeetSimple\obj" rmdir /s /q "src\MeetSimple\obj" 2>nul
+if exist "src\MeetSimple\bin" rmdir /s /q "src\MeetSimple\bin" 2>nul
 
 echo Building Meet Simple (self-contained single-file, so users need nothing installed)...
 rem Single-file packs managed assemblies into MeetSimple.exe. Whisper native libs must stay on disk

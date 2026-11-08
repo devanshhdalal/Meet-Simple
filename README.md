@@ -31,6 +31,8 @@ Nothing is uploaded. Speech recognition runs locally with [Whisper](https://gith
 - **Accurate defaults** — Whisper `large-v3-turbo` with beam search; optional glossary for names and jargon  
 - **Vulkan or CPU** — uses GPU when Whisper.net’s Vulkan runtime is available  
 - **First-run tour** — skippable, replayable from the sidebar  
+- **Keeps working while you look around** — a running job shrinks into a progress pill at the bottom of the window; click it to jump back  
+- **Never loses a recording** — closed or crashed mid-meeting? It offers to transcribe what was saved next time  
 
 ---
 
@@ -136,6 +138,8 @@ Suggested workflow:
 ## License
 
 [MIT](LICENSE) © 2026 Devansh.
+
+The UI font is [Inter](https://rsms.me/inter/) by Rasmus Andersson, under the SIL Open Font License 1.1 (`src/MeetSimple/Fonts/OFL.txt`, shipped as `Licenses/Inter-OFL.txt`).
 
 Speech and summary **models are not shipped** in this repository; they are downloaded at runtime and carry their own licenses (e.g. Meta’s Community License for the default summary model). Built with [Whisper.net](https://github.com/sandrohanea/whisper.net), [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [NAudio](https://github.com/naudio/NAudio), and [Ollama](https://ollama.com).
 
