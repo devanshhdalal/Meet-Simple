@@ -1,14 +1,32 @@
 # Meet Simple
 
 **Private meeting transcription and summaries on your Windows PC.**  
-Nothing is uploaded. Speech recognition runs locally with [Whisper](https://github.com/ggerganov/whisper.cpp) via [Whisper.net](https://github.com/sandrohanea/whisper.net). Optional summaries run locally with [Ollama](https://ollama.com).
+Nothing is uploaded. Speech recognition runs locally with [Whisper](https://github.com/ggml-org/whisper.cpp) via [Whisper.net](https://github.com/sandrohanea/whisper.net). Optional summaries run locally with [Ollama](https://ollama.com).
 
 [![CI](https://github.com/devanshhdalal/Meet-Simple/actions/workflows/ci.yml/badge.svg)](https://github.com/devanshhdalal/Meet-Simple/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/devanshhdalal/Meet-Simple?include_prereleases&style=flat-square)](https://github.com/devanshhdalal/Meet-Simple/releases)
 
 <p align="center">
   <em>Record a call or open a file → get a transcript (and optionally a short summary) that never leaves your machine.</em>
 </p>
+
+<p align="center">
+  <img src="docs/home.png" alt="Meet Simple home screen — Transcribe only or Transcribe + summarize" width="900" />
+</p>
+
+---
+
+## Quick start
+
+1. Download **`MeetSimple-win-x64.zip`** from [Releases](https://github.com/devanshhdalal/Meet-Simple/releases).  
+2. Unzip and open the **`MeetSimple`** folder.  
+3. Double-click **`MeetSimple.exe`**.
+
+**Transcribe only** works without installing anything else (first run downloads a speech model after you agree).  
+**Transcribe + summarize** needs a local summary engine: the app can download and run the **[Ollama](https://ollama.com) installer** (a separate third-party product from Ollama Inc.) after you confirm, then pull a summary model through Ollama on localhost. You can also install Ollama yourself first.
+
+Only record calls when everyone involved agrees — laws and policies vary.
 
 ---
 
@@ -19,7 +37,9 @@ Nothing is uploaded. Speech recognition runs locally with [Whisper](https://gith
 | **Private by design** | Audio, transcripts, and summaries stay on disk. No accounts, no cloud API for speech or summary. |
 | **Built for meetings** | Captures mic (“You”) and computer audio (“Others”) as separate tracks, then merges them into one readable transcript. |
 | **Honest downloads** | Large models are fetched only after you agree. Checksums and signature checks apply where we can. |
-| **Windows-native** | colour “spaces”, light/dark that can follow Windows, self-contained zip (no .NET install for end users). |
+| **Windows-native** | Arc-inspired shell, colour themes, light/dark that can follow Windows, self-contained zip (no .NET install for end users). |
+
+**Why not Otter or Buzz?** Cloud tools like Otter upload your audio. Local apps like [Buzz](https://github.com/chidiwilliams/buzz) are excellent general Whisper UIs — Meet Simple is meeting-focused on Windows: dual-track You/Others capture, optional **local** summary via Ollama, and a desktop flow that asks before multi‑GB downloads.
 
 ---
 
@@ -27,35 +47,78 @@ Nothing is uploaded. Speech recognition runs locally with [Whisper](https://gith
 
 - **Record a meeting** — microphone + system audio as separate tracks  
 - **Open an existing file** — MP4, MOV, MKV, MP3, WAV, M4A, and more  
-- **Transcribe only** or **Transcribe + summarize** (filler cleaned for the summary path only)  
+- **Transcribe only** or **Transcribe + summarize** (filler cleaned for the summary path only; the transcript stays verbatim)  
 - **Accurate defaults** — Whisper `large-v3-turbo` with beam search; optional glossary for names and jargon  
-- **Vulkan or CPU** — uses GPU when Whisper.net’s Vulkan runtime is available  
+
+<details>
+<summary><b>Also included</b></summary>
+
+- **Vulkan or CPU** — uses the GPU when Whisper.net’s Vulkan runtime works; turn on “processor only” in Settings, or the app disables the GPU path after a graphics-card crash marker  
 - **First-run tour** — skippable, replayable from the sidebar  
-- **Keeps working while you look around** — a running job shrinks into a progress pill at the bottom of the window; click it to jump back  
-- **Never loses a recording** — closed or crashed mid-meeting? It offers to transcribe what was saved next time  
+- **Progress pill** — a running job shrinks into a pill at the bottom of the window; click it to jump back  
+- **Recording recovery** — if the app closed or crashed mid-meeting, it can offer to transcribe what was already saved (headset unplug / default-device switching are still being hardened)
+
+</details>
 
 ---
 
-## Quick start (end users)
+## Requirements
 
-1. Download **`MeetSimple-win-x64.zip`** from [Releases](https://github.com/devanshhdalal/Meet-Simple/releases) (or build it yourself below).  
-2. Unzip — you get a **`MeetSimple`** folder.  
-3. Open that folder and double-click **`MeetSimple.exe`**.  
-4. Keep the other files next to the exe (they are required support libraries). See `Read me.txt` in the folder.
+| | |
+| --- | --- |
+| **OS** | Windows 10 or 11, **x64** (Whisper.net’s docs list Windows 11+; we still aim to support Windows 10 — please file an issue if a Win10 box fails) |
+| **CPU** | x64 with **AVX, AVX2, FMA, and F16C** (the default Whisper.net CPU runtime). We do not currently ship the separate NoAvx runtime. |
+| **GPU** | Optional. Vulkan can speed transcription up when available; otherwise CPU works. |
+| **Disk (ballpark)** | Default speech model `large-v3-turbo-q5_0` ≈ **574 MB**. Larger Whisper cuts are up to ~3 GB. Summary models are separate (e.g. Llama 3.1 8B ≈ 5 GB via Ollama). Keep several GB free before the first summarize setup. |
+| **RAM (ballpark)** | Plan on roughly **2–4 GB** free for the default turbo speech model while it runs; full `large-v3` and 8B summary models need more (often **6–10 GB+** combined). |
+| **Speed** | Hardware-dependent. Prefer a Vulkan-capable GPU when you can; CPU-only works but is slower. Exact “30-minute meeting → X minutes” numbers vary by CPU/GPU and model — open an issue with your timing if you measure one. |
+| **VC++** | [Visual C++ 2022 x64 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) — the zip is self-contained for .NET, but Whisper’s native libraries may still need this. |
+| **Summaries** | [Ollama](https://ollama.com) (third-party) + a pulled model. Meet Simple can install Ollama for you after you agree, or you can install it yourself. Not required for transcription-only. |
 
-Unsigned builds may show a Windows SmartScreen warning: **More info → Run anyway**. A code-signed release removes that prompt.
+Models are downloaded once (speech under `%LOCALAPPDATA%\MeetSimple\models\`, summaries into Ollama’s store) and reused across app updates.
 
-Verify the zip when a SHA-256 is published next to the download:
+---
+
+## Troubleshooting
+
+- **Keep the folder together** — do not move `MeetSimple.exe` alone; `runtimes\` and the `*_cor3.dll` files next to it are required. See `Read me.txt` in the zip.  
+- **SmartScreen** on unsigned builds: **More info → Run anyway**. A code-signed release removes that prompt.  
+- **Verify the zip** when a SHA-256 is published with the release:
 
 ```bat
 certutil -hashfile MeetSimple-win-x64.zip SHA256
+```
+
+- If Whisper fails to load with a vague native error, install the **VC++ 2022 x64** redistributable above and retry.
+
+---
+
+## Sample output
+
+Illustrative example (not from a real recorded meeting):
+
+**Transcript (abridged):**
+
+```text
+[00:00:12] You: Can we lock the Q2 launch for the 14th?
+[00:00:18] Others: Works on our side if docs are ready by Friday.
+[00:00:25] You: I'll send the checklist today. Any blockers on API keys?
+[00:00:31] Others: None — staging is green.
+```
+
+**Summary (abridged):**
+
+```text
+- Agreed Q2 launch target: 14th, pending docs by Friday
+- Action: send launch checklist today
+- Staging/API keys: no blockers
 ```
 
 ---
 
 ## Build from source
 
-**Requirements:** Windows 10/11 x64, [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (SDK, not only the runtime).
+**Requirements:** Windows 10/11 x64, [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (SDK, not only the runtime). Prefer the 64-bit SDK under `%ProgramW6432%\dotnet`.
 
 ```bat
 build\build.bat
@@ -80,7 +143,8 @@ works for day-to-day compile checks; use `build\build.bat` for something you can
 
 | Path | Purpose |
 | --- | --- |
-| `src/MeetSimple/` | WPF app (code, XAML, NuGet lockfile) |
+| `src/MeetSimple/` | WPF app (code, XAML, NuGet lockfile, fonts) |
+| `docs/` | Screenshots and other media for this README |
 | `build/` | Publish script, trim helper, Inno Setup script |
 | `.github/` | CI, CodeQL, Dependabot |
 | `README.md` / `AGENTS.md` / … | Docs at the root for GitHub |
@@ -88,6 +152,8 @@ works for day-to-day compile checks; use `build\build.bat` for something you can
 ---
 
 ## How it works
+
+Everything below runs on your PC. Summarize steps are skipped in transcribe-only mode.
 
 ```mermaid
 flowchart LR
@@ -116,9 +182,7 @@ Architecture notes for contributors live in [`AGENTS.md`](AGENTS.md).
 - No telemetry. Processing is local.  
 - Network use is limited to **user-approved** setup: speech models (Hugging Face), the Ollama installer (ollama.com → GitHub), and summary model pulls through **localhost** Ollama.  
 - Downloads are HTTPS-only, host-allowlisted, size-capped, and checksum-verified; the Ollama installer must pass an Authenticode check for “Ollama Inc.” before it runs.  
-- Only record calls when everyone involved agrees — laws and policies vary.
-
-Dependency versions are locked (`packages.lock.json`). CI restores with `--locked-mode` and runs CodeQL, Dependabot, and a vulnerable-package check. See [`SECURITY.md`](SECURITY.md) to report issues.
+- Supply chain: locked `packages.lock.json`, CI `--locked-mode`, CodeQL, and Dependabot. See [`SECURITY.md`](SECURITY.md) to report issues.
 
 ---
 
@@ -141,10 +205,23 @@ Suggested workflow:
 
 The UI font is [Inter](https://rsms.me/inter/) by Rasmus Andersson, under the SIL Open Font License 1.1 (`src/MeetSimple/Fonts/OFL.txt`, shipped as `Licenses/Inter-OFL.txt`).
 
-Speech and summary **models are not shipped** in this repository; they are downloaded at runtime and carry their own licenses (e.g. Meta’s Community License for the default summary model). Built with [Whisper.net](https://github.com/sandrohanea/whisper.net), [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [NAudio](https://github.com/naudio/NAudio), and [Ollama](https://ollama.com).
+Speech and summary **models are not shipped** in this repository; they are downloaded at runtime and carry their own licenses. The default summary model (`llama3.1:8b`) is under Meta’s [**Llama 3.1 Community License**](https://www.llama.com/llama3_1/license/). Built with [Whisper.net](https://github.com/sandrohanea/whisper.net), [whisper.cpp](https://github.com/ggml-org/whisper.cpp), [NAudio](https://github.com/naudio/NAudio), and [Ollama](https://ollama.com).
 
 ---
 
 ## Status
 
-Early open-source release. The app builds and the core pipeline runs on real machines for shell/startup paths; broader testing (recording, Vulkan, Ollama silent install) is still ongoing. Bug reports and fixes help a lot.
+Early open-source release ([v0.1.1](https://github.com/devanshhdalal/Meet-Simple/releases/tag/v0.1.1)). Bug reports and timed hardware notes are welcome.
+
+**Verified**
+- App launches on Windows 11 x64; self-contained zip layout (`MeetSimple.exe` + `runtimes\`)
+- Transcribe-only path does not require Ollama
+- Speech models cache under AppData and are reused across app updates
+
+**Known limitations**
+- Live recording edge cases (headset unplug, default-device switch) still being hardened
+- Vulkan / GPU path not exhaustively tested across hardware
+- Ollama silent install + Authenticode checks need more real-machine confirmation
+- Default Whisper CPU runtime expects **AVX2** (NoAvx runtime not shipped yet)
+- Windows 10 support intended but less exercised than Windows 11
+- No published reference timings yet for “N-minute meeting → X minutes” on CPU vs GPU
