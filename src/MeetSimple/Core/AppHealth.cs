@@ -54,6 +54,23 @@ public static class AppHealth
         }
     }
 
+    /// <summary>A one-line note in the same log (for example what the call watcher decided and why), to make reports easy to follow.</summary>
+    public static void LogEvent(string message)
+    {
+        try
+        {
+            lock (LogGate)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+                File.AppendAllText(LogPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}", Encoding.UTF8);
+            }
+        }
+        catch (Exception)
+        {
+            // Logging must never cause a second failure.
+        }
+    }
+
     // ----- graphics-card crash detection -----
     // A crash inside the native speech engine ends the process without any exception to catch. So a marker file is
     // written before transcribing and removed afterwards; if it is still there at the next start, the last run died.

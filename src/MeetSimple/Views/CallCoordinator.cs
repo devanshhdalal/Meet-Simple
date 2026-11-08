@@ -52,7 +52,8 @@ public sealed class CallCoordinator : IDisposable
     public void ApplySettings()
     {
         var settings = AppSettings.Current;
-        if (settings.WatchForCalls) watcher.Start(); else watcher.Stop();
+        // While a call is being recorded the watcher must keep running, or the end of the call would never be noticed.
+        if (settings.WatchForCalls || IsRecording) watcher.Start(); else watcher.Stop();
         StartupRegistration.Apply(settings.StartWithWindows);
         RefreshTray();
 
@@ -118,7 +119,8 @@ public sealed class CallCoordinator : IDisposable
         }
         string folder = AppHealth.UniqueFolder(AppSettings.RecordingsRoot,
             $"{DateTime.Now:yyyy-MM-dd HH.mm} {InputValidation.SafeFileName(call.AppName)} call");
-        var callRecorder = new AudioRecorder();
+        // Record the microphone and speakers the call itself uses, which are often a headset rather than the defaults.
+        var callRecorder = new AudioRecorder(call.MicrophoneDeviceId, call.SpeakerDeviceId);
         try
         {
             callRecorder.StartRecording(folder);
@@ -169,7 +171,7 @@ public sealed class CallCoordinator : IDisposable
         recordedCall = null;
         RecordingFolder = null;
         ClosePrompt();
-        RefreshTray();
+        ApplySettings(); // Stops the watcher if watching was switched off during the call.
 
         if (result.Duration < TimeSpan.FromSeconds(3))
         {

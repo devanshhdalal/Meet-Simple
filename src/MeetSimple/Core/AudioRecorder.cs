@@ -21,6 +21,11 @@ public sealed class AudioRecorder : IDisposable
     private const long MinimumFreeBytesToRecord = 2L * 1024 * 1024 * 1024;
 
     private readonly object gate = new();
+    private readonly string? microphoneDeviceId;
+    private readonly string? speakerDeviceId;
+    private MMDeviceEnumerator? deviceEnumerator;
+    private MMDevice? microphoneDevice;
+    private MMDevice? speakerDevice;
     private WasapiCapture? microphoneCapture;
     private WasapiLoopbackCapture? computerCapture;
     private TrackWriter? microphoneWriter;
@@ -41,13 +46,22 @@ public sealed class AudioRecorder : IDisposable
     public float ComputerAudioLevel => Volatile.Read(ref computerLevel);
     public TimeSpan Elapsed => IsRecording && clock != null ? clock.Elapsed : finalDuration;
 
+    /// <param name="microphoneDeviceId">Record this microphone instead of the Windows default (for a call: the one the call app uses).</param>
+    /// <param name="speakerDeviceId">Record what plays on this output instead of the default (call apps often use the headset).</param>
+    public AudioRecorder(string? microphoneDeviceId = null, string? speakerDeviceId = null)
+    {
+        this.microphoneDeviceId = microphoneDeviceId;
+        this.speakerDeviceId = speakerDeviceId;
+    }
+
     public void StartMonitoring()
     {
         if (microphoneCapture != null || computerCapture != null) return;
 
         try
         {
-            var capture = new WasapiCapture();
+            microphoneDevice = OpenActiveDevice(microphoneDeviceId);
+            var capture = microphoneDevice != null ? new WasapiCapture(microphoneDevice) : new WasapiCapture();
             capture.DataAvailable += OnMicrophoneData;
             capture.RecordingStopped += (_, stopped) => OnCaptureStopped(stopped.Exception, isMicrophone: true);
             capture.StartRecording();
@@ -60,7 +74,8 @@ public sealed class AudioRecorder : IDisposable
 
         try
         {
-            var capture = new WasapiLoopbackCapture();
+            speakerDevice = OpenActiveDevice(speakerDeviceId);
+            var capture = speakerDevice != null ? new WasapiLoopbackCapture(speakerDevice) : new WasapiLoopbackCapture();
             capture.DataAvailable += OnComputerData;
             capture.RecordingStopped += (_, stopped) => OnCaptureStopped(stopped.Exception, isMicrophone: false);
             capture.StartRecording();
@@ -70,6 +85,24 @@ public sealed class AudioRecorder : IDisposable
         {
             ComputerAudioError = error.Message;
         }
+    }
+
+    /// <summary>The requested device if it is still connected and active; null means "use the Windows default".</summary>
+    private MMDevice? OpenActiveDevice(string? deviceId)
+    {
+        if (string.IsNullOrEmpty(deviceId)) return null;
+        try
+        {
+            deviceEnumerator ??= new MMDeviceEnumerator();
+            var device = deviceEnumerator.GetDevice(deviceId);
+            if (device.State == DeviceState.Active) return device;
+            device.Dispose();
+        }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or ArgumentException)
+        {
+            // Unplugged since the call started; the default device is the best remaining choice.
+        }
+        return null;
     }
 
     public void StartRecording(string folder)
@@ -212,6 +245,12 @@ public sealed class AudioRecorder : IDisposable
         computerCapture?.Dispose();
         microphoneCapture = null;
         computerCapture = null;
+        microphoneDevice?.Dispose();
+        speakerDevice?.Dispose();
+        deviceEnumerator?.Dispose();
+        microphoneDevice = null;
+        speakerDevice = null;
+        deviceEnumerator = null;
     }
 }
 
