@@ -17,6 +17,9 @@ public sealed class AppSettings
 
     /// <summary>Names and jargon the speech model should spell correctly, e.g. "Anmol, Kubernetes, OKRs".</summary>
     public string Glossary { get; set; } = "";
+
+    /// <summary>false = processor only. Switched off automatically if the graphics card crashed during a transcription.</summary>
+    public bool UseGraphicsCard { get; set; } = true;
     public string SummaryModel { get; set; } = "llama3.1:8b";
     public string Language { get; set; } = "";
 
@@ -75,7 +78,10 @@ public sealed class AppSettings
         {
             Sanitize();
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            // Write to a temporary file first so a crash or power cut can never leave a half-written settings file.
+            string temporaryPath = SettingsPath + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temporaryPath, SettingsPath, overwrite: true);
         }
         catch (Exception)
         {

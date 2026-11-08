@@ -134,7 +134,9 @@ public partial class RunView : UserControl, IDisposable
     private void ShowFailure(Exception error)
     {
         failureDetails = Redaction.Scrub(error.ToString());
-        MessageText.Text = "Something went wrong: " + error.Message;
+        AppHealth.LogError(error, "Job failed");
+        MessageText.Text = "Something went wrong: " + error.Message
+            + "\nTechnical details were saved to: " + AppHealth.LogPath;
         MessageText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
 
         ButtonBar.Children.Clear();

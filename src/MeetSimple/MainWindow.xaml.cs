@@ -49,6 +49,14 @@ public partial class MainWindow : Window
         {
             ShowTutorial();
         }
+
+        if (App.GraphicsCardTurnedOffAfterCrash)
+        {
+            App.GraphicsCardTurnedOffAfterCrash = false;
+            AppDialog.Notice(this, "Graphics card turned off",
+                "Meet Simple closed unexpectedly while transcribing with the graphics card, so it now uses the processor only. "
+                + "Transcribing will be slower but more reliable. You can turn the graphics card back on in Settings.");
+        }
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -60,6 +68,8 @@ public partial class MainWindow : Window
             return;
         }
         (Host.Content as RunView)?.Cancel();
+        // Exiting on purpose must not look like a graphics-card crash at the next start.
+        AppHealth.ClearGpuAttempt();
     }
 
     private bool IsBusy =>

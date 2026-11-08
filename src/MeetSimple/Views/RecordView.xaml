@@ -15,7 +15,7 @@
             <Button x:Name="BackButton" Content="&#x2190;  Back" Style="{StaticResource LinkButton}"
                     HorizontalAlignment="Left" Click="OnBackClick" />
             <views:FlowStepStrip x:Name="StepStrip" Margin="0,10,0,0" />
-            <TextBlock Text="Record a meeting" FontSize="24" FontWeight="Bold" Margin="0,10,0,2" />
+            <TextBlock Text="Record a meeting" Style="{StaticResource DisplayTitle}" FontSize="24" Margin="0,10,0,2" />
             <TextBlock x:Name="SubtitleText" FontSize="14" Foreground="{DynamicResource MutedBrush}"
                        Text="Start the recording, then join or continue your call as usual." />
         </StackPanel>

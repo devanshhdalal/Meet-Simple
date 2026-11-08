@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -19,7 +20,7 @@ public static class AudioPreparer
     private static PreparedAudio Prepare(
         string sourcePath, string wavOutputPath, IProgress<double>? progress, CancellationToken cancellationToken)
     {
-        using var reader = new AudioFileReader(sourcePath);
+        using var reader = OpenReader(sourcePath);
         ISampleProvider monoProvider = new MonoDownmixSampleProvider(reader);
         ISampleProvider whisperProvider = reader.WaveFormat.SampleRate == WhisperSampleRate
             ? monoProvider
@@ -53,6 +54,31 @@ public static class AudioPreparer
             throw new InvalidOperationException("No audio could be read from this file.");
         }
         return new PreparedAudio(wavOutputPath, TimeSpan.FromSeconds((double)totalSamples / WhisperSampleRate), peak);
+    }
+
+    /// <summary>Opens the file and turns the cryptic errors Windows media decoders give into something a person can act on.</summary>
+    private static AudioFileReader OpenReader(string sourcePath)
+    {
+        try
+        {
+            return new AudioFileReader(sourcePath);
+        }
+        catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new InvalidOperationException("The file could not be found. It may have been moved or deleted.", error);
+        }
+        catch (Exception error) when (error is UnauthorizedAccessException or IOException)
+        {
+            throw new InvalidOperationException(
+                "The file could not be opened. It may be in use by another program (close it and try again) or protected.", error);
+        }
+        catch (Exception error) when (error is COMException or InvalidDataException or NotSupportedException
+                                          or FormatException or InvalidOperationException or ArgumentException)
+        {
+            throw new InvalidOperationException(
+                "Meet Simple could not read the audio in this file. The format may not be supported or the file may be damaged. "
+                + "Try converting it to MP3 or WAV (for example with VLC or HandBrake) and choose the converted file.", error);
+        }
     }
 
     /// <summary>Averages all channels into one.</summary>

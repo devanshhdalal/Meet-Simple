@@ -1,20 +1,18 @@
 <Window x:Class="MeetSimple.Views.AppDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="Meet Simple" SizeToContent="WidthAndHeight" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        Background="{DynamicResource BackgroundBrush}"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         FontFamily="{StaticResource AppFont}" FontSize="14"
         TextElement.Foreground="{DynamicResource TextBrush}"
         MinWidth="420" MaxWidth="520">
-    <shell:WindowChrome.WindowChrome>
-        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="0" GlassFrameThickness="0"
-                            CornerRadius="12" UseAeroCaptionButtons="False" />
-    </shell:WindowChrome.WindowChrome>
 
-    <Border Margin="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource LineBrush}"
+    <Border Margin="12" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource LineBrush}"
             BorderThickness="1" CornerRadius="12" Padding="28,24,28,22">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24" ShadowDepth="3" Direction="270" Color="Black" Opacity="0.22" />
+        </Border.Effect>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -22,7 +20,8 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock x:Name="TitleText" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock x:Name="TitleText" Style="{StaticResource DisplayTitle}" FontSize="18"
+                       FontWeight="SemiBold" TextWrapping="Wrap" />
             <TextBlock Grid.Row="1" x:Name="BodyText" TextWrapping="Wrap" Margin="0,10,0,0"
                        Foreground="{DynamicResource MutedBrush}" LineHeight="22" />
 

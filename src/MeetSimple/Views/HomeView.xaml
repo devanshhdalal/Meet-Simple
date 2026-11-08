@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid>
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,0,0,24">
-            <TextBlock Text="What would you like to do?" FontSize="26" FontWeight="Bold"
+            <TextBlock Text="What would you like to do?" Style="{StaticResource DisplayTitle}" FontSize="26"
                        HorizontalAlignment="Center" />
             <TextBlock Text="Turn meetings and recordings into text — privately, on this computer."
                        FontSize="14" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center"
@@ -17,8 +17,8 @@
                             <TextBlock Style="{StaticResource GlyphText}" Text="&#xE8A5;" FontSize="19"
                                        Foreground="{DynamicResource AccentTextBrush}" />
                         </Border>
-                        <TextBlock DockPanel.Dock="Top" Text="Transcribe only" FontSize="19" FontWeight="Bold"
-                                   Margin="0,14,0,6" />
+                        <TextBlock DockPanel.Dock="Top" Text="Transcribe only" Style="{StaticResource DisplayTitle}"
+                                   FontSize="19" Margin="0,14,0,6" />
                         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap"
                                    Text="Get the full text of your meeting or recording, with timestamps." />
                         <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" FontSize="12"
@@ -34,8 +34,8 @@
                             <TextBlock Style="{StaticResource GlyphText}" Text="&#xE8FD;" FontSize="19"
                                        Foreground="{DynamicResource AccentTextBrush}" />
                         </Border>
-                        <TextBlock DockPanel.Dock="Top" Text="Transcribe + summarize" FontSize="19" FontWeight="Bold"
-                                   Margin="0,14,0,6" />
+                        <TextBlock DockPanel.Dock="Top" Text="Transcribe + summarize" Style="{StaticResource DisplayTitle}"
+                                   FontSize="19" Margin="0,14,0,6" />
                         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap"
                                    Text="Also get a short summary with only the important points, decisions and tasks." />
                         <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" FontSize="12"

@@ -17,6 +17,8 @@ public sealed class RecordingResult
 /// </summary>
 public sealed class AudioRecorder : IDisposable
 {
+    private const long MinimumFreeBytesToRecord = 2L * 1024 * 1024 * 1024;
+
     private readonly object gate = new();
     private WasapiCapture? microphoneCapture;
     private WasapiLoopbackCapture? computerCapture;
@@ -26,6 +28,10 @@ public sealed class AudioRecorder : IDisposable
     private float microphoneLevel;
     private float computerLevel;
     private TimeSpan finalDuration;
+    private bool isDisposed;
+
+    /// <summary>Raised (possibly on a background thread) when something stops working while recording, with a message for the user.</summary>
+    public event Action<string>? DeviceProblem;
 
     public string? MicrophoneError { get; private set; }
     public string? ComputerAudioError { get; private set; }
@@ -42,6 +48,7 @@ public sealed class AudioRecorder : IDisposable
         {
             var capture = new WasapiCapture();
             capture.DataAvailable += OnMicrophoneData;
+            capture.RecordingStopped += (_, stopped) => OnCaptureStopped(stopped.Exception, isMicrophone: true);
             capture.StartRecording();
             microphoneCapture = capture;
         }
@@ -54,6 +61,7 @@ public sealed class AudioRecorder : IDisposable
         {
             var capture = new WasapiLoopbackCapture();
             capture.DataAvailable += OnComputerData;
+            capture.RecordingStopped += (_, stopped) => OnCaptureStopped(stopped.Exception, isMicrophone: false);
             capture.StartRecording();
             computerCapture = capture;
         }
@@ -67,6 +75,7 @@ public sealed class AudioRecorder : IDisposable
     {
         if (IsRecording) return;
         Directory.CreateDirectory(folder);
+        AppHealth.EnsureFreeSpace(folder, MinimumFreeBytesToRecord);
         StartMonitoring();
 
         lock (gate)
@@ -89,8 +98,8 @@ public sealed class AudioRecorder : IDisposable
         lock (gate)
         {
             finalDuration = clock?.Elapsed ?? TimeSpan.Zero;
-            string? microphonePath = microphoneWriter?.Finish();
-            string? computerPath = computerWriter?.Finish();
+            string? microphonePath = FinishSafely(microphoneWriter);
+            string? computerPath = FinishSafely(computerWriter);
             microphoneWriter = null;
             computerWriter = null;
             IsRecording = false;
@@ -111,10 +120,7 @@ public sealed class AudioRecorder : IDisposable
         {
             Volatile.Write(ref microphoneLevel, AudioLevels.Peak(data.Buffer, data.BytesRecorded, format));
         }
-        lock (gate)
-        {
-            microphoneWriter?.Write(data.Buffer, data.BytesRecorded);
-        }
+        WriteSafely(ref microphoneWriter, data, "microphone");
     }
 
     private void OnComputerData(object? sender, WaveInEventArgs data)
@@ -124,14 +130,76 @@ public sealed class AudioRecorder : IDisposable
         {
             Volatile.Write(ref computerLevel, AudioLevels.Peak(data.Buffer, data.BytesRecorded, format));
         }
+        WriteSafely(ref computerWriter, data, "computer sound");
+    }
+
+    /// <summary>
+    /// Runs on the capture thread, where an exception would close the whole app and lose the meeting.
+    /// A failing track is closed and reported; the other track keeps recording.
+    /// </summary>
+    private void WriteSafely(ref TrackWriter? writer, WaveInEventArgs data, string trackName)
+    {
+        string? problem = null;
         lock (gate)
         {
-            computerWriter?.Write(data.Buffer, data.BytesRecorded);
+            if (writer == null) return;
+            try
+            {
+                writer.Write(data.Buffer, data.BytesRecorded);
+            }
+            catch (Exception error) when (error is IOException or ObjectDisposedException or UnauthorizedAccessException)
+            {
+                try
+                {
+                    writer.Dispose();
+                }
+                catch (Exception disposeError) when (disposeError is IOException or ObjectDisposedException)
+                {
+                    // The file is already unusable; nothing more to do.
+                }
+                writer = null;
+                problem = $"Saving the {trackName} failed ({error.Message}). Is the drive full? "
+                          + "That part of the recording stopped; the rest continues.";
+            }
+        }
+        if (problem != null) DeviceProblem?.Invoke(problem);
+    }
+
+    private void OnCaptureStopped(Exception? error, bool isMicrophone)
+    {
+        // A normal stop has no exception; an exception means the device went away (unplugged, disabled, driver reset).
+        if (error == null || isDisposed) return;
+        string deviceName = isMicrophone ? "microphone" : "computer sound";
+        if (isMicrophone)
+        {
+            MicrophoneError = error.Message;
+            Volatile.Write(ref microphoneLevel, 0f);
+        }
+        else
+        {
+            ComputerAudioError = error.Message;
+            Volatile.Write(ref computerLevel, 0f);
+        }
+        DeviceProblem?.Invoke($"The {deviceName} stopped working ({error.Message}). It may have been unplugged or switched off. "
+                              + "Anything else keeps recording.");
+    }
+
+    private static string? FinishSafely(TrackWriter? writer)
+    {
+        if (writer == null) return null;
+        try
+        {
+            return writer.Finish();
+        }
+        catch (IOException)
+        {
+            return writer.FilePath; // Keep whatever reached the disk rather than losing the path.
         }
     }
 
     public void Dispose()
     {
+        isDisposed = true;
         if (IsRecording)
         {
             StopRecording();
@@ -181,6 +249,10 @@ internal sealed class TrackWriter : IDisposable
     private readonly Stopwatch clock;
     private readonly WaveFormat format;
     private long bytesWritten;
+    private TimeSpan lastFlush;
+
+    // Flushing refreshes the WAV header, so a crash or power cut loses seconds of audio instead of the whole file.
+    private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(10);
 
     public TrackWriter(string filePath, WaveFormat format, Stopwatch clock)
     {
@@ -198,6 +270,11 @@ internal sealed class TrackWriter : IDisposable
         PadWithSilence(expectedBytesBeforeChunk, minimumGapSeconds: 0.25);
         writer.Write(buffer, 0, count);
         bytesWritten += count;
+        if (clock.Elapsed - lastFlush > FlushInterval)
+        {
+            writer.Flush();
+            lastFlush = clock.Elapsed;
+        }
     }
 
     public string Finish()

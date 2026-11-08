@@ -47,6 +47,11 @@
     <Using Include="System.Net.Http" />
   </ItemGroup>
 
+  <!-- SF Pro Display only (Regular / Medium / Bold). -->
+  <ItemGroup>
+    <Resource Include="Fonts\*.otf" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Explicit so packages.lock.json matches both `dotnet build` and single-file `dotnet publish`
          (publish injects this otherwise and locked-mode restore fails with NU1004). -->

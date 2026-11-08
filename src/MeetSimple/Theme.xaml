@@ -5,7 +5,14 @@
     <!-- Colours live in Themes\Light.xaml and Themes\Dark.xaml and are swapped at runtime, so every
          brush below is referenced with DynamicResource. -->
 
-    <FontFamily x:Key="AppFont">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <!-- SF Pro Display only (glyphs stay Segoe MDL2 Assets). -->
+    <FontFamily x:Key="AppFont">pack://application:,,,/Fonts/#SF Pro Display</FontFamily>
+    <FontFamily x:Key="AppDisplayFont">pack://application:,,,/Fonts/#SF Pro Display</FontFamily>
+
+    <Style x:Key="DisplayTitle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource AppFont}" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
 
     <!-- cubic-bezier(0.65, 0, 0.35, 1): eases in, moves quickly through the middle, eases out. Used by every animation. -->
     <theming:CubicBezierEase x:Key="StandardEase" />

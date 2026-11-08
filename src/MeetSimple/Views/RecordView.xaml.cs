@@ -27,12 +27,42 @@ public partial class RecordView : UserControl, IDisposable
         clockTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         clockTimer.Tick += (_, _) => TimerText.Text = TextProcessing.FormatTimestamp(recorder.Elapsed);
 
+        recorder.DeviceProblem += OnDeviceProblem;
         if (recorder.MicrophoneError != null && recorder.ComputerAudioError != null)
         {
-            StatusText.Text = "Neither the microphone nor the computer's sound could be opened, so nothing can be recorded.";
+            ShowStatus("Neither the microphone nor the computer's sound could be opened, so nothing can be recorded. "
+                       + "Check Windows Settings > Privacy & security > Microphone.", isWarning: true);
             RecordButton.IsEnabled = false;
         }
+        else if (DescribeMissingInput() is { } missingInput)
+        {
+            ShowStatus(missingInput, isWarning: true);
+        }
     }
+
+    private string? DescribeMissingInput()
+    {
+        if (recorder.MicrophoneError != null)
+        {
+            return "The microphone could not be opened, so only the computer's sound will be recorded. "
+                   + "Check that a microphone is connected and allowed in Windows Settings > Privacy & security > Microphone.";
+        }
+        if (recorder.ComputerAudioError != null)
+        {
+            return "The computer's sound could not be captured, so only your microphone will be recorded.";
+        }
+        return null;
+    }
+
+    private void ShowStatus(string message, bool isWarning)
+    {
+        StatusText.Text = message;
+        StatusText.SetResourceReference(TextBlock.ForegroundProperty, isWarning ? "WarningBrush" : "MutedBrush");
+    }
+
+    /// <summary>Raised from the audio threads (a device was unplugged, or the disk is full).</summary>
+    private void OnDeviceProblem(string message) =>
+        Dispatcher.BeginInvoke(() => ShowStatus(message, isWarning: true));
 
     public bool IsRecording => recorder.IsRecording;
 
@@ -50,14 +80,14 @@ public partial class RecordView : UserControl, IDisposable
 
     private void StartRecording()
     {
-        sessionFolder = Path.Combine(AppSettings.RecordingsRoot, DateTime.Now.ToString("yyyy-MM-dd HH.mm") + " Meeting");
+        sessionFolder = AppHealth.UniqueFolder(AppSettings.RecordingsRoot, DateTime.Now.ToString("yyyy-MM-dd HH.mm") + " Meeting");
         try
         {
             recorder.StartRecording(sessionFolder);
         }
         catch (Exception error)
         {
-            StatusText.Text = "Could not start recording: " + error.Message;
+            ShowStatus("Could not start recording: " + error.Message, isWarning: true);
             return;
         }
 
@@ -65,7 +95,10 @@ public partial class RecordView : UserControl, IDisposable
         RecordButton.Content = "Stop and transcribe";
         RecordButton.Style = (Style)FindResource("DangerButton");
         Motion.Settle(RecordButton);
-        StatusText.Text = "Recording... your audio stays on this computer.";
+        string? missingInput = DescribeMissingInput();
+        ShowStatus(missingInput == null
+            ? "Recording... your audio stays on this computer."
+            : "Recording... " + missingInput, missingInput != null);
         clockTimer.Start();
     }
 
@@ -76,7 +109,7 @@ public partial class RecordView : UserControl, IDisposable
 
         if (recording.Duration < TimeSpan.FromSeconds(3))
         {
-            ResetToIdle("That recording was too short. Try again when you're ready.");
+            ResetToIdle("That recording was too short. Try again when you're ready.", isWarning: true);
             return;
         }
 
@@ -92,20 +125,21 @@ public partial class RecordView : UserControl, IDisposable
         }
     }
 
-    private void ResetToIdle(string message)
+    private void ResetToIdle(string message, bool isWarning = false)
     {
         BackButton.IsEnabled = true;
         RecordButton.Content = "Start recording";
         RecordButton.Style = (Style)FindResource("AccentButton");
         Motion.Settle(RecordButton);
         TimerText.Text = "00:00:00";
-        StatusText.Text = message;
+        ShowStatus(message, isWarning);
     }
 
     public void Dispose()
     {
         clockTimer.Stop();
         Meters.Detach();
+        recorder.DeviceProblem -= OnDeviceProblem;
         recorder.Dispose();
     }
 }

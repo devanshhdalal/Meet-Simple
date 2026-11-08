@@ -68,7 +68,7 @@ public static class SummaryService
             progress.Report(new ProgressInfo((double)index / (chunks.Count + 1),
                 $"Reading part {index + 1} of {chunks.Count} ({timeRange})..."));
 
-            string chunkNotes = await generate(model, string.Format(ChunkPrompt, timeRange, text), cancellationToken);
+            string chunkNotes = await GenerateWithRetryAsync(generate, model, string.Format(ChunkPrompt, timeRange, text), cancellationToken);
             if (chunkNotes.Trim().TrimEnd('.').ToLowerInvariant() != "nothing important")
             {
                 notes.Add($"[{timeRange}]\n{chunkNotes}");
@@ -87,13 +87,31 @@ public static class SummaryService
             for (int start = 0; start < notes.Count; start += 3)
             {
                 string group = string.Join("\n\n", notes.Skip(start).Take(3));
-                merged.Add(await generate(model, string.Format(MergePrompt, group), cancellationToken));
+                merged.Add(await GenerateWithRetryAsync(generate, model, string.Format(MergePrompt, group), cancellationToken));
             }
             notes = merged;
         }
 
         progress.Report(new ProgressInfo((double)chunks.Count / (chunks.Count + 1), "Writing the final summary..."));
-        return await generate(model, string.Format(FinalPrompt, string.Join("\n\n", notes)), cancellationToken);
+        return await GenerateWithRetryAsync(generate, model, string.Format(FinalPrompt, string.Join("\n\n", notes)), cancellationToken);
+    }
+
+    /// <summary>A brief connection hiccup to the local AI should not throw away a long summary run.</summary>
+    private static async Task<string> GenerateWithRetryAsync(
+        Func<string, string, CancellationToken, Task<string>> generate, string model, string prompt, CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await generate(model, prompt, cancellationToken);
+            }
+            catch (Exception error) when (attempt < 3 && !cancellationToken.IsCancellationRequested
+                                          && error is HttpRequestException or IOException or System.Text.Json.JsonException)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt), cancellationToken);
+            }
+        }
     }
 
     private static int WordCount(IEnumerable<string> notes) =>

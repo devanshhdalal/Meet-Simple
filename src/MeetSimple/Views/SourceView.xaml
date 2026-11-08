@@ -13,7 +13,7 @@
             <Button Content="&#x2190;  Back" Style="{StaticResource LinkButton}" HorizontalAlignment="Left"
                     Click="OnBackClick" />
             <views:FlowStepStrip x:Name="StepStrip" Margin="0,10,0,0" />
-            <TextBlock x:Name="TitleText" FontSize="24" FontWeight="Bold" Margin="0,10,0,2" />
+            <TextBlock x:Name="TitleText" Style="{StaticResource DisplayTitle}" FontSize="24" Margin="0,10,0,2" />
             <TextBlock Text="Where is the audio coming from?" FontSize="14"
                        Foreground="{DynamicResource MutedBrush}" />
         </StackPanel>
@@ -26,8 +26,8 @@
                         <TextBlock Style="{StaticResource GlyphText}" Text="&#xE720;" FontSize="19"
                                    Foreground="{DynamicResource AccentTextBrush}" />
                     </Border>
-                    <TextBlock DockPanel.Dock="Top" Text="Record a meeting" FontSize="18" FontWeight="Bold"
-                               Margin="0,14,0,6" />
+                    <TextBlock DockPanel.Dock="Top" Text="Record a meeting" Style="{StaticResource DisplayTitle}"
+                               FontSize="18" Margin="0,14,0,6" />
                     <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap"
                                Text="Captures your microphone and the sound from your computer at the same time - perfect for calls. The transcript shows who said what: You or Others." />
                     <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" FontSize="12"
@@ -42,8 +42,8 @@
                         <TextBlock Style="{StaticResource GlyphText}" Text="&#xE8E5;" FontSize="19"
                                    Foreground="{DynamicResource AccentTextBrush}" />
                     </Border>
-                    <TextBlock DockPanel.Dock="Top" Text="Use an existing file" FontSize="18" FontWeight="Bold"
-                               Margin="0,14,0,6" />
+                    <TextBlock DockPanel.Dock="Top" Text="Use an existing file" Style="{StaticResource DisplayTitle}"
+                               FontSize="18" Margin="0,14,0,6" />
                     <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap"
                                Text="Pick a video or audio recording you already have - MP4, MOV, MKV, MP3, WAV, M4A and more." />
                     <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" FontSize="12"

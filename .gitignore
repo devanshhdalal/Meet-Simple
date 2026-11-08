@@ -16,5 +16,7 @@ publish/
 *_transcript.txt
 *_summary.txt
 settings.json
+# Visual Studio temporary design-time projects
+*_wpftmp.csproj
 # Local publish experiments
 ms-pub-test*/

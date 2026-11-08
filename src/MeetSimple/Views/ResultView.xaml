@@ -14,7 +14,7 @@
             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                 <TextBlock Style="{StaticResource GlyphText}" Text="&#xE73E;" FontSize="22"
                            Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Center" Margin="0,0,10,0" />
-                <TextBlock Text="All done" FontSize="26" FontWeight="Bold"
+                <TextBlock Text="All done" Style="{StaticResource DisplayTitle}" FontSize="26"
                            Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
             </StackPanel>
             <TextBlock x:Name="SubtitleText" FontSize="13" Foreground="{DynamicResource MutedBrush}"

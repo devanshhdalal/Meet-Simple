@@ -164,7 +164,7 @@ public sealed class JobPipeline
             });
 
             Directory.CreateDirectory(request.OutputFolder);
-            string safeBaseName = InputValidation.SafeFileName(request.BaseName);
+            string safeBaseName = AppHealth.UniqueBaseName(request.OutputFolder, InputValidation.SafeFileName(request.BaseName));
             string transcriptPath = Path.Combine(request.OutputFolder, safeBaseName + "_transcript.txt");
             await File.WriteAllTextAsync(transcriptPath, TextProcessing.RenderTranscript(segments), Encoding.UTF8, cancellationToken);
 

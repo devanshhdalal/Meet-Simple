@@ -25,6 +25,8 @@ public static class DownloadPolicies
 public static class Downloader
 {
     private const int MaxRedirects = 5;
+    private const int MaxAttempts = 3;
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
     private static readonly HttpClient Http = CreateClient();
 
     private static HttpClient CreateClient()
@@ -48,7 +50,7 @@ public static class Downloader
         string partialPath = destinationPath + ".part";
         try
         {
-            var downloaded = await DownloadToPartialFileAsync(url, partialPath, policy, progress, cancellationToken);
+            var downloaded = await DownloadWithRetriesAsync(url, partialPath, policy, progress, cancellationToken);
             string? rejection = verify?.Invoke(downloaded);
             if (rejection != null)
             {
@@ -60,6 +62,51 @@ public static class Downloader
         {
             try { File.Delete(partialPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             throw;
+        }
+    }
+
+    /// <summary>A dropped connection on a multi-gigabyte download is routine, so brief network trouble is retried.</summary>
+    private static async Task<DownloadedFile> DownloadWithRetriesAsync(
+        string url, string partialPath, DownloadPolicy policy, IProgress<ProgressInfo> progress, CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await DownloadToPartialFileAsync(url, partialPath, policy, progress, cancellationToken);
+            }
+            catch (Exception error) when (attempt < MaxAttempts && IsTransient(error, cancellationToken))
+            {
+                progress.Report(new ProgressInfo(null, $"Connection problem. Trying again ({attempt + 1} of {MaxAttempts})..."));
+                await Task.Delay(TimeSpan.FromSeconds(3 * attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static bool IsTransient(Exception error, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested) return false;
+        return error switch
+        {
+            HttpRequestException http => http.StatusCode is not { } status
+                                         || (int)status >= 500
+                                         || status is System.Net.HttpStatusCode.RequestTimeout or System.Net.HttpStatusCode.TooManyRequests,
+            IOException or TimeoutException => true,
+            _ => false,
+        };
+    }
+
+    private static async Task<int> ReadWithStallGuardAsync(
+        Stream source, byte[] buffer, CancellationTokenSource stallGuard, CancellationToken cancellationToken)
+    {
+        stallGuard.CancelAfter(StallTimeout);
+        try
+        {
+            return await source.ReadAsync(buffer, stallGuard.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException("The download stalled because no data arrived for a minute.");
         }
     }
 
@@ -75,6 +122,12 @@ public static class Downloader
                 throw new InvalidDataException("The download is larger than expected, so it was refused.");
             }
 
+            if (declaredLength is long expectedLength)
+            {
+                AppHealth.EnsureFreeSpace(partialPath, expectedLength + 64L * 1024 * 1024);
+            }
+
+            using var stallGuard = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
             await using var target = new FileStream(partialPath, FileMode.Create, FileAccess.Write, FileShare.None);
             using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -82,7 +135,7 @@ public static class Downloader
             var buffer = new byte[256 * 1024];
             long receivedBytes = 0;
             int bytesRead;
-            while ((bytesRead = await source.ReadAsync(buffer, cancellationToken)) > 0)
+            while ((bytesRead = await ReadWithStallGuardAsync(source, buffer, stallGuard, cancellationToken)) > 0)
             {
                 receivedBytes += bytesRead;
                 if (receivedBytes > policy.MaxBytes)
@@ -117,7 +170,19 @@ public static class Downloader
         for (int hop = 0; hop <= MaxRedirects; hop++)
         {
             EnsureAllowed(currentUrl, policy);
-            var response = await Http.GetAsync(currentUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            HttpResponseMessage response;
+            using (var headerGuard = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                headerGuard.CancelAfter(StallTimeout);
+                try
+                {
+                    response = await Http.GetAsync(currentUrl, HttpCompletionOption.ResponseHeadersRead, headerGuard.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new TimeoutException("The server took too long to respond.");
+                }
+            }
 
             if (serverSha256 == null && response.Headers.TryGetValues("X-Linked-Etag", out var etagValues))
             {

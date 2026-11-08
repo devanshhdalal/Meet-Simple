@@ -24,6 +24,7 @@ flowchart LR
         Ollama[OllamaClient + OllamaSetup<br/>on-demand install and model pull]
         Models[SpeechModelStore<br/>ggml download on demand]
         Pipe[JobPipeline]
+        Health[AppHealth<br/>error log, GPU crash marker, disk checks, unique names, temp cleanup]
     end
     subgraph Look [Look and feel]
         Theme[ThemeManager<br/>system / light / dark, swapped live]
@@ -36,6 +37,10 @@ flowchart LR
     UI -.-> Motion
     Run --> Pipe
     Record --> Rec
+    Rec -. DeviceProblem .-> Record
+    Whisper -. marker file .-> Health
+    Run -. failures .-> Health
+    App[App.xaml.cs<br/>single instance, crash handlers] --> Health
     Pipe --> Models --> Prep --> Whisper --> Text --> Sum --> Ollama
 ```
 
@@ -45,13 +50,14 @@ flowchart LR
   README.md, LICENSE, CONTRIBUTING.md, SECURITY.md, AGENTS.md
   MeetSimple.sln, global.json
   .github/                 CI, CodeQL, Dependabot
-  src/MeetSimple/          WPF app project (csproj, XAML, Core, Views, Theming, Themes)
+  src/MeetSimple/          WPF app project (csproj, XAML, Core, Views, Theming, Themes, Fonts)
   build/                   build.bat, Trim-Publish.ps1, installer.iss
   publish/                 local output only (gitignored)
 ```
 - `src/MeetSimple/Core/` - no UI code. `JobPipeline` runs the steps and reports `StepUpdate`s; setup steps (speech model, Ollama, summary AI) run only when the chosen mode needs them.
-- `src/MeetSimple/Views/` - one UserControl per screen; `MainWindow` is the shell (custom chrome: sidebar + floating content card) and owns navigation (`Navigate`, `Show*`).
-- `src/MeetSimple/Theme.xaml` - colours, button/card styles. Use `AccentButton`, `QuietButton`, `LinkButton`, `DangerButton`, `CardBorder`, `ChoiceCardButton` (keyboard-focusable Home/Source cards), `PanelBorder`.
+- `src/MeetSimple/Views/` - one UserControl per screen; `MainWindow` is the shell (custom chrome: sidebar + floating content card) and owns navigation (`Navigate`, `Show*`). `AppDialog` is the themed notice/confirm window.
+- `src/MeetSimple/Fonts/` - embedded SF Pro Display OTF cuts (Regular, Medium, Bold), included as WPF `Resource` (`Fonts\*.otf` in the csproj).
+- `src/MeetSimple/Theme.xaml` - colours, fonts, button/card styles. Use `AccentButton`, `QuietButton`, `LinkButton`, `DangerButton`, `CardBorder`, `ChoiceCardButton` (keyboard-focusable Home/Source cards), `PanelBorder`, `DisplayTitle` (bold page/card titles).
 - `build/build.bat` - self-contained single-file publish to repo-root `publish\` + zip for sharing. Force-closes running `MeetSimple.exe` first; calls `build/Trim-Publish.ps1` to drop unused Whisper RIDs and write `Read me.txt`. `build/installer.iss` - optional Inno Setup installer.
 
 ## Behaviour to preserve
@@ -68,6 +74,8 @@ flowchart LR
 - `Themes/Light.xaml` and `Themes/Dark.xaml` hold only colour brushes and must define identical keys. `ThemeManager` swaps them at runtime (merged dictionary index 0). First launch follows the Windows light/dark setting (`Theme = "system"`), and it updates live if Windows changes while the app is open. Choosing Light/Dark in Settings or the sidebar sun/moon button saves an explicit choice.
 - Always reference brushes with `{DynamicResource ...}` (never `StaticResource`), and from code use `SetResourceReference` - otherwise that element will not change when the theme does. Use `AccentTextBrush` for accent-coloured text (readable on dark), `AccentBrush` for fills and borders, `ErrorFillBrush` for red button backgrounds.
 - Title bars follow the theme through `ThemeManager.Attach(window, brushKey)` (call it for every new window). Prefer `AppDialog` (themed notice/confirm) for in-app prompts; keep native MessageBox only for unexpected fatal errors in `App.xaml.cs`.
+- **Typography:** SF Pro Display only for all UI text. `AppFont` and `AppDisplayFont` both point at `pack://application:,,,/Fonts/#SF Pro Display` in `Theme.xaml`. Windows set `FontFamily="{StaticResource AppFont}"`; page and card titles use `Style="{StaticResource DisplayTitle}"` (same family, Bold). Do not add other typefaces. Icon glyphs stay `Segoe MDL2 Assets` via `GlyphText` / explicit `FontFamily` — that system font is required for the symbol set and is not UI body text.
+- **`AppDialog`:** borderless transparent window (`WindowStyle="None"`, `AllowsTransparency="True"`, `Background="Transparent"`) with a rounded `SurfaceBrush` card and soft `DropShadowEffect`. Do not put an opaque `Background` or `WindowChrome` CornerRadius on it — that draws a hard black rectangle around the rounded card. Source: `Views/AppDialog.xaml`.
 - Every animation uses `CubicBezierEase` (cubic-bezier 0.65, 0, 0.35, 1: ease in, ease out): in XAML as `{StaticResource StandardEase}`, in code through `Theming/Motion.cs` (`FadeIn`, `RiseIn`, `FadeOut`, `Settle`, `AnimateValue`, `Capture`). Durations are 0.2-0.4 s for hover and press, about 0.4-0.6 s for screens and theme changes. Do not add instant colour or visibility jumps.
 - Screen changes and theme changes cross-fade using a picture of the old state (`PageSnapshot`, `ThemeSnapshot` in MainWindow). When Windows animations are off (`Motion.Enabled` is false) everything changes instantly.
 - Arc-inspired shell (`MainWindow.xaml`): no standard title bar (`WindowChrome`, 36 px drag strip, custom minimise/maximise/close). A gradient "space" backdrop (`SpaceBackdropBrush`) fills the window; the left sidebar draws straight on it (new-transcript pill, pinned tiles, Library rows, space dots, theme toggle) and all screens live in a rounded floating card on the right. When maximised, `RootGrid.Margin` is set to the resize border so nothing is cut off. No privacy footnote in the rail — trust copy lives on Home. Library nav rows use roomy padding (`SidebarNavButton` / `SidebarButton` `10,11` plus small margins between Home / Settings / Quick tour).
@@ -91,6 +99,7 @@ flowchart LR
 ## Licensing
 - This project is MIT (`LICENSE`). Dependencies (NAudio, Whisper.net, Whisper model weights) are believed to be MIT - verify on each package/repo page before a release; re-check when upgrading (e.g. NAudio 3 needs net9.0+).
 - Models are downloaded at runtime and never bundled in releases or the installer. The default summary model (`llama3.1:8b`) is under Meta's Community License, which the user accepts when it is pulled; bundling it would make this project a redistributor. Keep `Catalog.SummaryModels` swappable (a permissively licensed model is an option).
+- **Fonts:** the app embeds Apple SF Pro Display OTF files under `src/MeetSimple/Fonts/`. Apple's license typically restricts redistribution outside Apple platforms — confirm before a public release zip, or swap to a redistributable face and keep `AppFont` as the single override point.
 - Documentation lives at the repo root: `README.md` (public landing page), `CONTRIBUTING.md`, `SECURITY.md`, and this file. App source is under `src/MeetSimple/`. If a third-party notice is added later, list each dependency, its license, and what the app downloads.
 
 ## Build and share
@@ -109,12 +118,22 @@ flowchart LR
 - Loudness normalization was deliberately not added (Whisper's log-mel features are level-insensitive). Whisper.net 1.9.0 has no VAD builder method (only raw native fields), so VAD is not used.
 - The transcript stays verbatim; `TextProcessing.CleanFiller` is applied only to summary input.
 
+## Robustness (`Core/AppHealth.cs` and friends)
+- **Error log:** `AppHealth.LogError` appends scrubbed errors to `%LOCALAPPDATA%\MeetSimple\logs\meet-simple.log` (rotates at 512 KB). Wired to the window-thread, background-thread and unobserved-task handlers in `App.xaml.cs` and to failed jobs in `RunView`. The error dialogs tell users where the file is so bug reports can include it.
+- **Graphics-card crash fallback:** a native Vulkan crash cannot be caught. `TranscriptionService.TranscribeAsync` writes `gpu-attempt.marker` before transcribing and deletes it in `finally`; `App.OnStartup` treats a surviving marker as a crash, sets `AppSettings.UseGraphicsCard = false` and `MainWindow.OnLoaded` explains it. `MainWindow.OnClosing` clears the marker so a deliberate exit is not mistaken for a crash. `TranscriptionService.ConfigureRuntime` sets `RuntimeOptions.RuntimeLibraryOrder` to CPU-only at startup (Whisper.net loads its native engine once, so a Settings change applies after restart).
+- **Recording:** `AudioRecorder` never lets an exception escape the capture threads (`WriteSafely`); a failed track is closed and reported through `DeviceProblem`, and `RecordingStopped` with an exception (device unplugged) is reported the same way. `RecordView` warns when only one input could be opened. `TrackWriter` flushes every 10 s so a crash loses seconds, not the file. Starting a recording needs 2 GB free (`AppHealth.EnsureFreeSpace`); recording folders and result file names never overwrite earlier ones (`UniqueFolder`, `UniqueBaseName`).
+- **Downloads:** `Downloader` retries transient failures up to 3 times (5xx/408/429, I/O, timeouts), aborts a connection that is silent for 60 s, and checks free disk space against the advertised size. Retries restart from zero (no resume yet).
+- **Other:** single-instance mutex in `App.OnStartup`; settings are saved atomically (temp file + move); orphaned `%TEMP%\MeetSimple\*` folders older than 24 h are removed at startup; `AudioPreparer.OpenReader` turns Media Foundation errors into plain advice (convert to MP3/WAV); `SummaryService` retries transient Ollama connection errors.
+- **Not covered yet / ideas:** download resume, unit tests for the pure logic (`TextProcessing`, `InputValidation`, `SummaryService` with its injectable `generate`), recordings beyond ~3 h per track (32-bit float WAV hits the 4 GB limit), crash recovery of an interrupted recording, an in-app "open log folder" button.
+
 ## Fixes already landed (do not reintroduce)
 - **CS1061 beam search:** cast `WithBeamSearchSamplingStrategy()` to `BeamSearchSamplingStrategyBuilder` in `Core/TranscriptionService.cs` (see Transcription accuracy).
 - **Startup crash `InvalidOperationException` read-only Freezable:** `SpaceManager` must replace frozen backdrop/accent brushes in Resources, never mutate static gradient stops after insert (see Theming and motion).
 - **Publish MSB3027:** `build\build.bat` kills running `MeetSimple.exe` before `dotnet publish`.
+- **`AppDialog` black frame:** keep the dialog `AllowsTransparency` + transparent window background with only the rounded card visible; opaque `Background` / `WindowChrome` CornerRadius brought back the hard black rectangle around the card (see Theming and motion).
 
 ## Status / unverified
 - Package versions confirmed building: NAudio 2.2.1, Whisper.net 1.9.0 + Runtime + Runtime.Vulkan. `WhisperFactory.FromPath`, `CreateBuilder().WithLanguage(...)`, temperature/threshold/`WithPrompt` builders, and `ProcessAsync(Stream, token)` compile on 1.9.0.
-- App has been built and launched past `ThemeManager` / `SpaceManager` init on a real machine after the Freezable fix. Craft pass added: sidebar spacing, removed rail privacy footnote, `ChoiceCardButton`, `FlowStepStrip`, `AppDialog`, Settings scroll + space picker, Run overall progress, tutorial step dots. Full UI pass and end-to-end recording / Vulkan / Ollama silent install still need real-machine verification.
+- App has been built and launched past `ThemeManager` / `SpaceManager` init on a real machine after the Freezable fix. Craft pass added: sidebar spacing, removed rail privacy footnote, `ChoiceCardButton`, `FlowStepStrip`, `AppDialog`, Settings scroll + space picker, Run overall progress, tutorial step dots. Typography forced to embedded SF Pro Display; `AppDialog` made transparent to kill the black frame. Full UI pass and end-to-end recording / Vulkan / Ollama silent install still need real-machine verification.
+- Robustness additions are statically checked only (syntax parse, name cross-check, no compiler available): `RuntimeOptions.RuntimeLibraryOrder = [RuntimeLibrary.Cpu, RuntimeLibrary.CpuNoAvx]` (Whisper.net 1.9.0 `Whisper.net.LibraryLoader`) and the assumption that NAudio's `WaveFileWriter.Flush()` refreshes the WAV header.
 - Not yet verified on a real machine: recording, Vulkan runtime selection, Ollama silent install flags and Authenticode signer name "Ollama Inc." (see Security).

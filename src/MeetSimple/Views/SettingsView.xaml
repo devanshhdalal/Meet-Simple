@@ -11,7 +11,7 @@
         <StackPanel Grid.Row="0">
             <Button Content="&#x2190;  Back" Style="{StaticResource LinkButton}" HorizontalAlignment="Left"
                     Click="OnBackClick" />
-            <TextBlock Text="Settings" FontSize="24" FontWeight="Bold" Margin="0,8,0,18" />
+            <TextBlock Text="Settings" Style="{StaticResource DisplayTitle}" FontSize="24" Margin="0,8,0,18" />
         </StackPanel>
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
@@ -36,6 +36,11 @@
                     <TextBlock Text="Best accuracy checks several wordings for every phrase. It takes noticeably longer."
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
                     <ComboBox x:Name="AccuracyBox" HorizontalAlignment="Left" />
+
+                    <TextBlock Text="Graphics card" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="Using the graphics card is faster. If transcribing ever crashes, choose processor only. Applies the next time you open Meet Simple."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" TextWrapping="Wrap" />
+                    <ComboBox x:Name="GraphicsBox" HorizontalAlignment="Left" />
 
                     <TextBlock Text="Names and special words" FontWeight="SemiBold" Margin="0,22,0,0" />
                     <TextBlock Text="Optional. People, companies and jargon to spell correctly, separated by commas."

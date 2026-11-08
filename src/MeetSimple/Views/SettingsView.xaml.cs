@@ -22,6 +22,9 @@ public partial class SettingsView : UserControl
         AccuracyBox.Items.Add(BestAccuracyLabel);
         AccuracyBox.Items.Add(FasterLabel);
         AccuracyBox.SelectedItem = settings.BestAccuracy ? BestAccuracyLabel : FasterLabel;
+        GraphicsBox.Items.Add(UseGraphicsLabel);
+        GraphicsBox.Items.Add(ProcessorOnlyLabel);
+        GraphicsBox.SelectedItem = settings.UseGraphicsCard ? UseGraphicsLabel : ProcessorOnlyLabel;
         GlossaryBox.Text = settings.Glossary;
 
         string summaryLabel = Catalog.LabelFor(Catalog.SummaryModels, settings.SummaryModel);
@@ -47,6 +50,8 @@ public partial class SettingsView : UserControl
 
     private const string BestAccuracyLabel = "Best accuracy (slower, recommended)";
     private const string FasterLabel = "Faster";
+    private const string UseGraphicsLabel = "Use the graphics card when available (faster)";
+    private const string ProcessorOnlyLabel = "Processor only (slower, most compatible)";
 
     private static readonly (ThemeChoice Choice, string Label)[] ThemeOptions =
     {
@@ -93,6 +98,7 @@ public partial class SettingsView : UserControl
         var settings = AppSettings.Current;
         settings.SpeechModel = Catalog.IdFor(Catalog.SpeechModels, SpeechModelBox.SelectedItem as string ?? "", Catalog.DefaultSpeechModel);
         settings.BestAccuracy = (AccuracyBox.SelectedItem as string) != FasterLabel;
+        settings.UseGraphicsCard = (GraphicsBox.SelectedItem as string) != ProcessorOnlyLabel;
         settings.Glossary = InputValidation.CleanGlossary(GlossaryBox.Text);
         settings.SummaryModel = Catalog.IdFor(Catalog.SummaryModels, SummaryModelBox.SelectedItem as string ?? "", "llama3.1:8b");
         settings.Language = languageCode;
