@@ -12,12 +12,24 @@ jobs:
   analyze:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
-      - uses: github/codeql-action/init@v3
+
+      - uses: github/codeql-action/init@v4
         with:
           languages: csharp
-      - run: dotnet build MeetSimple.csproj -c Release
-      - uses: github/codeql-action/analyze@v3
+          build-mode: manual
+
+      # Same restore/build path as CI so locked-mode and Release compile stay in sync.
+      - name: Restore (locked)
+        run: dotnet restore MeetSimple.sln --locked-mode
+
+      - name: Build
+        run: dotnet build MeetSimple.sln -c Release --no-restore
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:csharp"

@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>MeetSimple</RootNamespace>
+    <AssemblyName>MeetSimple</AssemblyName>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- English UI only — skip dozens of .NET satellite assemblies in publish. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <!-- Security and reproducibility -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <Deterministic>true</Deterministic>
+    <!-- Style-only analyzer hints that add noise; real warnings stay visible -->
+    <NoWarn>$(NoWarn);CA1305;CA1816;CA1822;CA1862;CA1863;CA1869</NoWarn>
+  </PropertyGroup>
+
+  <!-- Release / share builds: no PDBs next to the app. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <RestoreLockedMode>true</RestoreLockedMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF projects leave these out of ImplicitUsings -->
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Explicit so packages.lock.json matches both `dotnet build` and single-file `dotnet publish`
+         (publish injects this otherwise and locked-mode restore fails with NU1004). -->
+    <PackageReference Include="Microsoft.NET.ILLink.Tasks" Version="8.0.33" PrivateAssets="all" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Whisper.net" Version="1.9.0" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.0" />
+    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.0" />
+  </ItemGroup>
+
+</Project>

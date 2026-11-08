@@ -9,17 +9,49 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
         with:
+          # Match global.json / end-user build story (.NET 8).
           dotnet-version: 8.0.x
+
+      - name: Show SDK
+        run: |
+          dotnet --info
+          dotnet --list-sdks
+
       - name: Restore (locked)
-        run: dotnet restore MeetSimple.csproj --locked-mode
+        run: dotnet restore MeetSimple.sln --locked-mode
+
       - name: Build
-        run: dotnet build MeetSimple.csproj -c Release --no-restore
+        run: dotnet build MeetSimple.sln -c Release --no-restore
+
+      - name: Publish smoke (same shape as build\build.bat)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (Test-Path publish) { Remove-Item -Recurse -Force publish }
+          dotnet publish src/MeetSimple/MeetSimple.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishReadyToRun=true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=false `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o publish
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit $LASTEXITCODE" }
+          & .\build\Trim-Publish.ps1 -PublishDir (Join-Path $PWD "publish")
+          if (-not (Test-Path "publish\MeetSimple.exe")) { throw "MeetSimple.exe missing from publish\" }
+          if (-not (Test-Path "publish\runtimes\win-x64")) { throw "Whisper win-x64 runtimes missing" }
+          if (-not (Test-Path "publish\runtimes\vulkan\win-x64")) { throw "Whisper Vulkan win-x64 runtimes missing" }
+          if (-not (Test-Path "publish\Read me.txt")) { throw "Read me.txt missing from publish\" }
+          Write-Host "Publish smoke OK:"
+          Get-ChildItem publish | Select-Object Name, Length | Format-Table -AutoSize
+
       - name: Fail on vulnerable packages
         shell: pwsh
         run: |
-          $report = dotnet list MeetSimple.csproj package --vulnerable --include-transitive 2>&1 | Out-String
+          $report = dotnet list src/MeetSimple/MeetSimple.csproj package --vulnerable --include-transitive 2>&1 | Out-String
           Write-Host $report
           if ($report -match 'has the following vulnerable packages') { throw 'Vulnerable NuGet packages found.' }

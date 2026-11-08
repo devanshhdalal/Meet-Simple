@@ -1,0 +1,65 @@
+<UserControl x:Class="MeetSimple.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="32,8,32,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <Button Content="&#x2190;  Back" Style="{StaticResource LinkButton}" HorizontalAlignment="Left"
+                    Click="OnBackClick" />
+            <TextBlock Text="Settings" FontSize="24" FontWeight="Bold" Margin="0,8,0,18" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+            <Border Style="{StaticResource PanelBorder}" Padding="26" VerticalAlignment="Top">
+                <StackPanel>
+                    <TextBlock Text="Appearance" FontWeight="SemiBold" />
+                    <TextBlock Text="Match the Windows setting, or always use light or dark."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
+                    <ComboBox x:Name="ThemeBox" HorizontalAlignment="Left" SelectionChanged="OnThemeBoxChanged" />
+
+                    <TextBlock Text="Space" FontWeight="SemiBold" Margin="0,18,0,0" />
+                    <TextBlock Text="The colour world behind the window. Same spaces as the dots in the sidebar."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,8" />
+                    <StackPanel x:Name="SpaceDotsPanel" Orientation="Horizontal" />
+
+                    <TextBlock Text="Speech quality" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="Higher quality is more accurate but slower and downloads a larger file once."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
+                    <ComboBox x:Name="SpeechModelBox" HorizontalAlignment="Left" />
+
+                    <TextBlock Text="Accuracy" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="Best accuracy checks several wordings for every phrase. It takes noticeably longer."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
+                    <ComboBox x:Name="AccuracyBox" HorizontalAlignment="Left" />
+
+                    <TextBlock Text="Names and special words" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="Optional. People, companies and jargon to spell correctly, separated by commas."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
+                    <TextBox x:Name="GlossaryBox" MaxLength="400" TextWrapping="Wrap" AcceptsReturn="False"
+                             MinHeight="60" VerticalContentAlignment="Top" />
+
+                    <TextBlock Text="Summary AI" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="Only used for Transcribe + summarize. Downloaded the first time you use it."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
+                    <ComboBox x:Name="SummaryModelBox" HorizontalAlignment="Left" />
+
+                    <TextBlock Text="Language" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="Leave empty to detect automatically. Or enter a code such as en, es, fr, de."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
+                    <TextBox x:Name="LanguageBox" Width="120" HorizontalAlignment="Left" />
+
+                    <Button Content="Open my recordings folder" Style="{StaticResource QuietButton}"
+                            HorizontalAlignment="Left" Margin="0,26,0,0" Click="OnOpenFolderClick" />
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+
+        <Button Grid.Row="2" Content="Save" Style="{StaticResource AccentButton}" HorizontalAlignment="Right"
+                Margin="0,14,0,0" Click="OnSaveClick" />
+    </Grid>
+</UserControl>
