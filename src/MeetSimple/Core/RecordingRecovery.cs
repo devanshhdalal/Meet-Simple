@@ -48,14 +48,19 @@ public static class RecordingRecovery
         }
     }
 
-    /// <summary>The newest recording that still has no transcript, with its audio files repaired, or null.</summary>
-    public static UnfinishedRecording? FindLatest()
+    /// <summary>
+    /// The newest recording that still has no transcript, with its audio files repaired, or null.
+    /// A folder that is being recorded into right now is skipped.
+    /// </summary>
+    public static UnfinishedRecording? FindLatest(string? folderBeingRecorded = null)
     {
         try
         {
             if (!Directory.Exists(AppSettings.RecordingsRoot)) return null;
             var folders = Directory.EnumerateDirectories(AppSettings.RecordingsRoot)
                 .Where(folder => File.Exists(Path.Combine(folder, MarkerName)))
+                .Where(folder => folderBeingRecorded == null
+                                 || !string.Equals(Path.GetFullPath(folder), Path.GetFullPath(folderBeingRecorded), StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(Directory.GetLastWriteTimeUtc);
             foreach (string folder in folders)
             {
@@ -68,6 +73,26 @@ public static class RecordingRecovery
             // The recordings folder cannot be read right now; nothing to offer.
         }
         return null;
+    }
+
+    /// <summary>
+    /// One recording folder (for example the one a "call recorded" notification points to). Only folders directly
+    /// inside the Recordings folder that still carry the marker are accepted, so a crafted path cannot point elsewhere.
+    /// </summary>
+    public static UnfinishedRecording? Load(string folder)
+    {
+        try
+        {
+            string fullFolder = Path.GetFullPath(folder);
+            string recordingsRoot = Path.GetFullPath(AppSettings.RecordingsRoot);
+            bool isRecordingFolder = string.Equals(Path.GetDirectoryName(fullFolder), recordingsRoot, StringComparison.OrdinalIgnoreCase);
+            if (!isRecordingFolder || !File.Exists(Path.Combine(fullFolder, MarkerName))) return null;
+            return Inspect(fullFolder);
+        }
+        catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static UnfinishedRecording? Inspect(string folder)

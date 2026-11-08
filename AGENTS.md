@@ -14,6 +14,8 @@ flowchart LR
         Record --> Run[RunView<br/>step list + progress]
         Run --> Result[ResultView]
         Island[ActivityIsland<br/>job pill, spring morph]
+        Prompt[CallPromptWindow<br/>top-of-screen island: Record? / timer]
+        Tray[TrayIcon<br/>open, watch, quit]
         Tour[TutorialWindow<br/>skip / replay]
     end
     subgraph Core [Core services]
@@ -25,6 +27,8 @@ flowchart LR
         Ollama[OllamaClient + OllamaSetup<br/>on-demand install and model pull]
         Models[SpeechModelStore<br/>ggml download on demand]
         Session[JobSession<br/>job outlives its screen]
+        Watcher[MeetingWatcher<br/>which apps hold the mic]
+        Startup[StartupRegistration<br/>HKCU Run entry]
         Pipe[JobPipeline]
         Recovery[RecordingRecovery + WavRepair<br/>unfinished recordings]
         Health[AppHealth<br/>error log, GPU crash marker, disk checks, unique names, temp cleanup]
@@ -43,6 +47,11 @@ flowchart LR
     Session --> Pipe
     Record --> Rec
     Record -. marker .-> Recovery
+    Calls[CallCoordinator] --> Watcher
+    Calls --> Prompt
+    Calls --> Tray
+    Calls --> Rec
+    Calls -. Windows notification<br/>Summarize / Transcribe only / Save for now .-> Session
     Rec -. DeviceProblem .-> Record
     Whisper -. marker file .-> Health
     Run -. failures .-> Health
@@ -95,6 +104,7 @@ flowchart LR
 
 ## Security (read before changing network, process or file code)
 - Threat model: local, single-user app. Audio, transcripts and summaries never leave the computer. Only runs with the user's rights (`app.manifest`: asInvoker).
+- Call detection reads only which apps hold the microphone (audio sessions + Windows privacy records), never audio, and records only after the user clicks Record. Registry writes: the optional HKCU Run value, and the notification library's per-user app registration (HKCU AppUserModelId / COM activator for notification clicks).
 - Network egress is exactly three things, each only after the user agrees in `ConfirmSetupAsync`: speech models from huggingface.co, the Ollama installer from ollama.com (redirects to GitHub), and summary models pulled by the local Ollama server. Ollama calls go to localhost only (`UseProxy=false`).
 - `Downloader`: HTTPS only, host allowlist checked on every redirect hop (manual redirects, max 5), size caps, SHA-256 computed while streaming, file moved into place only after `verify` passes.
 - Speech models: id must be in `Catalog.SpeechModels`; the download is rejected unless it matches Hugging Face's `X-Linked-Etag` SHA-256 (fail closed).
@@ -145,6 +155,13 @@ flowchart LR
 - **Ollama calls** stream and use `IdleWatchdog` (10 min to the first word, then 90 s between words; pulls 2 min, then 5 min between updates) rather than a total timeout; a pull checks free disk space once the size is known.
 - **Echo filter:** passages of fewer than 3 words count as an echo only if the words match exactly and start within 0.5 s of the other track's passage.
 - **Errors:** the window-thread handler logs every error but shows at most one dialog per 15 s and never two at once. The Ollama signer check reads decoded certificate name parts (`EnumerateRelativeDistinguishedNames`), not comma-split text.
+
+## Call detection (`Core/MeetingWatcher`, `Views/CallCoordinator`)
+- **Detection never listens to audio.** Every 2 s `MeetingWatcher` lists which apps hold a microphone, from two sources: active audio sessions on every capture device (NAudio Core Audio, gives the process) and Windows' privacy records `HKCU\...\CapabilityAccessManager\ConsentStore\microphone` (`LastUsedTimeStart > LastUsedTimeStop` = in use; covers packaged apps such as new Teams). Known call apps count directly; browsers count with a meeting name from the window title ("Google Meet") or as "Chrome call". 8 s of holding = a call (voice typing does not count); 5 s of release = ended. Meet Simple's own process is ignored.
+- **Flow:** `CallCoordinator` shows `CallPromptWindow` (a non-activating, topmost island at the top centre of the screen: "Zoom call · Not now / Record", auto-dismiss after 20 s). Record starts a background `AudioRecorder` into `Recordings\<date> <App> call` with the recovery marker set to Transcribe + summarize; the island becomes a red-dot timer with stop. The call app releasing the mic (or stop) ends it and shows a real Windows notification (Microsoft.Toolkit.Uwp.Notifications): Summarize, Transcribe only, Save for now (background activation). A click on the notification's body opens the "recording is waiting" question. Notification arguments are untrusted: `RecordingRecovery.Load` accepts only marked folders directly inside the Recordings folder. If notifications are unavailable the app asks in its own window instead.
+- **Never records without a click.** No prompt while the Record screen is recording or another prompt is up; the Record screen refuses to start while a call is being recorded.
+- **Tray and startup:** with Watch for calls on (default), closing the window hides it to the tray (one-time balloon), because watching needs the app running. Tray: click opens, right-click has Watch for calls and Quit. Start with Windows (default off) writes `"<exe>" --background` to `HKCU\...\Run`, re-applied every start so it follows a moved folder; a background or notification launch stays in the tray. Starting Meet Simple again signals the running copy (`Local\MeetSimple.ShowWindow`) to come forward. Signing out, restarts and tray Quit really exit (`MainWindow.AllowExit`).
+- **Build impact:** target is `net8.0-windows10.0.19041.0` (Windows notifications), `UseWindowsForms` for `NotifyIcon` with `System.Windows.Forms`/`System.Drawing` removed from global usings (they clash with WPF names; use `Forms = System.Windows.Forms` aliases). `app.ico` (violet "M", Inter Display Bold) is the exe, taskbar, tray and notification icon. `packages.lock.json` must be regenerated and committed after the first restore.
 
 ## Fixes already landed (do not reintroduce)
 - **CS1061 beam search:** cast `WithBeamSearchSamplingStrategy()` to `BeamSearchSamplingStrategyBuilder` in `Core/TranscriptionService.cs` (see Transcription accuracy).

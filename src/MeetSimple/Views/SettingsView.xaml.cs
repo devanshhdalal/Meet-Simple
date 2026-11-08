@@ -25,6 +25,12 @@ public partial class SettingsView : UserControl
         GraphicsBox.Items.Add(ProcessorOnlyLabel);
         GraphicsBox.SelectedItem = settings.UseGraphicsCard ? UseGraphicsLabel : ProcessorOnlyLabel;
         GlossaryBox.Text = settings.Glossary;
+        CallWatchBox.Items.Add(WatchCallsLabel);
+        CallWatchBox.Items.Add(OffLabel);
+        CallWatchBox.SelectedItem = settings.WatchForCalls ? WatchCallsLabel : OffLabel;
+        StartupBox.Items.Add(OffLabel);
+        StartupBox.Items.Add(StartInTrayLabel);
+        StartupBox.SelectedItem = settings.StartWithWindows ? StartInTrayLabel : OffLabel;
 
         string summaryLabel = Catalog.LabelFor(Catalog.SummaryModels, settings.SummaryModel);
         if (!SummaryModelBox.Items.Contains(summaryLabel)) SummaryModelBox.Items.Add(summaryLabel);
@@ -52,6 +58,9 @@ public partial class SettingsView : UserControl
     private const string FasterLabel = "Faster";
     private const string UseGraphicsLabel = "Use the graphics card when available (faster)";
     private const string ProcessorOnlyLabel = "Processor only (slower, most compatible)";
+    private const string WatchCallsLabel = "Ask to record when a call starts";
+    private const string StartInTrayLabel = "Start in the tray when I sign in";
+    private const string OffLabel = "Off";
 
     private static readonly (ThemeChoice Choice, string Label)[] ThemeOptions =
     {
@@ -95,7 +104,10 @@ public partial class SettingsView : UserControl
         settings.Glossary = InputValidation.CleanGlossary(GlossaryBox.Text);
         settings.SummaryModel = Catalog.IdFor(Catalog.SummaryModels, SummaryModelBox.SelectedItem as string ?? "", "llama3.1:8b");
         settings.Language = languageCode;
+        settings.WatchForCalls = (CallWatchBox.SelectedItem as string) == WatchCallsLabel;
+        settings.StartWithWindows = (StartupBox.SelectedItem as string) == StartInTrayLabel;
         settings.Save();
+        App.Calls?.ApplySettings();
 
         // The speech engine is chosen once per run, so compare with what is actually loaded, not with the old setting.
         if (settings.UseGraphicsCard != TranscriptionService.GraphicsCardEnabledForThisRun)

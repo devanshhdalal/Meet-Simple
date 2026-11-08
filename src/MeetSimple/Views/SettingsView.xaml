@@ -27,6 +27,16 @@
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,8" />
                     <StackPanel x:Name="SpaceDotsPanel" Orientation="Horizontal" />
 
+                    <TextBlock Text="Calls" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="When a call starts in Zoom, Teams, Meet or a similar app, ask if you want to record it. Nothing is recorded unless you say so."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" TextWrapping="Wrap" />
+                    <ComboBox x:Name="CallWatchBox" HorizontalAlignment="Left" />
+
+                    <TextBlock Text="Start with Windows" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="Open quietly in the tray when you sign in, ready for your next call."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" TextWrapping="Wrap" />
+                    <ComboBox x:Name="StartupBox" HorizontalAlignment="Left" />
+
                     <TextBlock Text="Speech quality" FontWeight="SemiBold" Margin="0,22,0,0" />
                     <TextBlock Text="Higher quality is more accurate but slower and downloads a larger file once."
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />

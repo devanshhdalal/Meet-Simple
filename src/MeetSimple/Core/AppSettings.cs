@@ -20,6 +20,15 @@ public sealed class AppSettings
 
     /// <summary>false = processor only. Switched off automatically if the graphics card crashed during a transcription.</summary>
     public bool UseGraphicsCard { get; set; } = true;
+
+    /// <summary>Ask to record when another app starts a call. While on, closing the window keeps Meet Simple in the tray.</summary>
+    public bool WatchForCalls { get; set; } = true;
+
+    /// <summary>Open quietly in the tray when the user signs in to Windows. Off unless the user turns it on.</summary>
+    public bool StartWithWindows { get; set; }
+
+    /// <summary>The one-time "still running in the tray" notice has been shown.</summary>
+    public bool TrayNoticeShown { get; set; }
     public string SummaryModel { get; set; } = "llama3.1:8b";
     public string Language { get; set; } = "";
 

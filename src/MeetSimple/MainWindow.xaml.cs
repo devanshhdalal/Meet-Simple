@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private const double IslandClearance = 76.0;
 
     private JobSession? activeJob;
+    private bool quitRequested;
 
     public MainWindow()
     {
@@ -47,6 +48,9 @@ public partial class MainWindow : Window
 
     private bool IsRecording => Host.Content is RecordView { IsRecording: true };
 
+    /// <summary>True while the Record screen is recording (a call recorded from the island does not count).</summary>
+    public bool IsRecordingInApp => IsRecording;
+
     private void OnThemeOrSpaceChromeChanged()
     {
         UpdateThemeToggle();
@@ -74,29 +78,76 @@ public partial class MainWindow : Window
         await OfferUnfinishedRecordingAsync();
     }
 
-    /// <summary>A recording that was cut off (window closed, crash, power cut) is offered for transcription once.</summary>
+    /// <summary>A recording that was never transcribed (saved for later, window closed, crash) is offered once per start.</summary>
     private async Task OfferUnfinishedRecordingAsync()
     {
-        var unfinished = await Task.Run(RecordingRecovery.FindLatest);
+        string? folderBeingRecorded = App.Calls?.RecordingFolder;
+        var unfinished = await Task.Run(() => RecordingRecovery.FindLatest(folderBeingRecorded));
         if (unfinished == null || activeJob != null) return;
+        await OfferRecordingAsync(unfinished);
+    }
 
-        string when = unfinished.StartedAt.ToString("dddd d MMMM 'at' HH:mm");
-        int minutes = Math.Max(1, (int)Math.Round(unfinished.Duration.TotalMinutes));
-        bool transcribe = AppDialog.Confirm(this, "A recording is waiting",
-            $"Your recording from {when} ({minutes} min) was saved but never transcribed, "
-            + "probably because Meet Simple closed while it was recording.\n\nTranscribe it now? "
+    public async Task OfferRecordingAsync(UnfinishedRecording recording)
+    {
+        string when = recording.StartedAt.ToString("dddd d MMMM 'at' HH:mm");
+        int minutes = Math.Max(1, (int)Math.Round(recording.Duration.TotalMinutes));
+        string question = recording.Mode == JobMode.TranscribeAndSummarize ? "Summarize it now?" : "Transcribe it now?";
+        bool start = AppDialog.Confirm(this, "A recording is waiting",
+            $"Your recording from {when} ({minutes} min) hasn't been transcribed yet.\n\n{question} "
             + "If you cancel, the audio stays in your Recordings folder.");
-        if (!transcribe)
+        if (!start)
         {
-            RecordingRecovery.Clear(unfinished.Folder);
+            RecordingRecovery.Clear(recording.Folder);
             return;
         }
-        var request = CreateRequest(unfinished.Mode, unfinished.Tracks, unfinished.Folder, "Meeting", unfinished.Folder);
+        var request = CreateRequest(recording.Mode, recording.Tracks, recording.Folder, "Meeting", recording.Folder);
         await StartJobAsync(request);
+    }
+
+    // ----- tray -----
+
+    /// <summary>Brings the window back from the tray (or from behind other windows).</summary>
+    public void ShowFromTray()
+    {
+        if (!IsVisible) Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    /// <summary>Quits for real (tray menu). The usual "something is still running" questions still apply.</summary>
+    public void RequestQuit()
+    {
+        App.Calls?.StopRecordingForExit();
+        quitRequested = true;
+        if (!IsVisible && (IsRecording || IsJobRunning)) ShowFromTray();
+        Close();
+        if (IsVisible) quitRequested = false; // The person chose to keep it running.
+    }
+
+    /// <summary>The next close really closes (restart, Windows signing out), instead of hiding in the tray.</summary>
+    public void AllowExit() => quitRequested = true;
+
+    private void HideToTray()
+    {
+        Hide();
+        var settings = AppSettings.Current;
+        if (settings.TrayNoticeShown) return;
+        settings.TrayNoticeShown = true;
+        settings.Save();
+        App.Calls?.ShowTrayNotice("Still watching for calls", "Meet Simple is in the tray. Right-click it to quit.");
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        // Watching only works while Meet Simple runs, so the close button tucks it into the tray instead.
+        // A running job keeps going there too; only an in-app recording needs its own answer below.
+        if (!quitRequested && AppSettings.Current.WatchForCalls && !IsRecording)
+        {
+            e.Cancel = true;
+            HideToTray();
+            return;
+        }
+
         if (IsRecording)
         {
             if (!AppDialog.Confirm(this, "Stop recording and exit?",
@@ -451,7 +502,16 @@ public partial class MainWindow : Window
         Navigate(new SourceView(this, mode));
     }
 
-    public void ShowRecord(JobMode mode) => Navigate(new RecordView(this, mode));
+    public void ShowRecord(JobMode mode)
+    {
+        if (App.Calls?.IsRecording == true)
+        {
+            AppDialog.Notice(this, "A call is being recorded", "Stop it from the pill at the top of the screen first.");
+            UpdateNavSelection();
+            return;
+        }
+        Navigate(new RecordView(this, mode));
+    }
     public void ShowSettings() => Navigate(new SettingsView(this));
     public void ShowResult(JobResult result) => Navigate(new ResultView(this, result));
 

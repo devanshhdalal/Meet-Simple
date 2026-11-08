@@ -57,6 +57,8 @@ Only record calls when everyone involved agrees — laws and policies vary.
 - **First-run tour** — skippable, replayable from the sidebar  
 - **Progress pill** — a running job shrinks into a pill at the bottom of the window; click it to jump back  
 - **Recording recovery** — if the app closed or crashed mid-meeting, it can offer to transcribe what was already saved (headset unplug / default-device switching are still being hardened)
+- **Notices your calls** — when Zoom, Teams, Meet or a similar app starts a call, a small island at the top of the screen asks whether to record; when the call ends, a Windows notification offers Summarize, Transcribe only or Save for now. It never records without your click  
+- **Start with Windows** (optional, off by default) — waits quietly in the tray, ready for the next call  
 
 </details>
 
