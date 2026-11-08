@@ -6,6 +6,7 @@ Nothing is uploaded. Speech recognition runs locally with [Whisper](https://gith
 [![CI](https://github.com/devanshhdalal/Meet-Simple/actions/workflows/ci.yml/badge.svg)](https://github.com/devanshhdalal/Meet-Simple/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/devanshhdalal/Meet-Simple?include_prereleases&style=flat-square)](https://github.com/devanshhdalal/Meet-Simple/releases)
+[![Discord](https://img.shields.io/badge/Discord-join_chat-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/vf9ruWmd6U)
 
 <p align="center">
   <em>Record a call or open a file → get a transcript (and optionally a short summary) that never leaves your machine.</em>
@@ -185,6 +186,14 @@ Architecture notes for contributors live in [`AGENTS.md`](AGENTS.md).
 - Network use is limited to **user-approved** setup: speech models (Hugging Face), the Ollama installer (ollama.com → GitHub), and summary model pulls through **localhost** Ollama.  
 - Downloads are HTTPS-only, host-allowlisted, size-capped, and checksum-verified; the Ollama installer must pass an Authenticode check for “Ollama Inc.” before it runs.  
 - Supply chain: locked `packages.lock.json`, CI `--locked-mode`, CodeQL, and Dependabot. See [`SECURITY.md`](SECURITY.md) to report issues.
+
+---
+
+## Community
+
+Questions, ideas, and feedback are welcome in the [Meet Simple Discord](https://discord.gg/vf9ruWmd6U).
+
+For bugs and concrete change proposals, prefer [GitHub Issues](https://github.com/devanshhdalal/Meet-Simple/issues) or a pull request so the discussion stays searchable with the code. Please do not report security vulnerabilities on Discord — see [`SECURITY.md`](SECURITY.md).
 
 ---
 
