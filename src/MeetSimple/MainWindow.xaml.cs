@@ -179,7 +179,6 @@ public partial class MainWindow : Window
     {
         var job = activeJob;
         if (job == null) return;
-        bool summarizing = job.Request.Mode == JobMode.TranscribeAndSummarize;
         switch (job.Status)
         {
             case JobStatus.Succeeded:
@@ -187,13 +186,53 @@ public partial class MainWindow : Window
                 Island.Update(IslandState.Done, hasSummary ? "Summary ready" : "Transcript ready", "Click to open", 1.0);
                 break;
             case JobStatus.Failed:
-                Island.Update(IslandState.Failed, "Couldn't finish", "Click to see what happened", job.OverallFraction);
+                Island.Update(IslandState.Failed, "Couldn't finish", "Click for details", job.OverallFraction);
                 break;
             case JobStatus.Running:
-                string verb = summarizing ? "Transcribe + summarize" : "Transcribing";
-                Island.Update(IslandState.Working, $"{verb} · {job.ActiveStepTitle}", job.StatusLabel, job.OverallFraction);
+                // Each fact appears once: the title says what is happening, the ring shows how far that step is,
+                // and the hover line only adds something new (time left, megabytes, which part).
+                string title = IslandTitleFor(job.ActiveStepId);
+                Island.Update(IslandState.Working, title, IslandDetailFrom(job.StatusLabel, title),
+                    job.ActiveStepFraction ?? job.OverallFraction);
                 break;
         }
+    }
+
+    private static string IslandTitleFor(string? stepId) => stepId switch
+    {
+        "speech_model" => "Preparing",
+        "ollama" => "Setting up summaries",
+        "ai_model" => "Getting the summary AI",
+        "audio" => "Reading audio",
+        "transcribe" => "Transcribing",
+        "summary" => "Summarizing",
+        _ => "Getting ready",
+    };
+
+    /// <summary>
+    /// Keeps only what the title and the ring do not already say: a leading percentage is dropped (the ring shows it),
+    /// and a line that merely restates the title ("Reading audio...", "Transcribe") is left out altogether.
+    /// </summary>
+    private static string IslandDetailFrom(string statusLabel, string title)
+    {
+        string detail = statusLabel.Trim();
+        int percentEnd = detail.IndexOf('%');
+        if (percentEnd > 0 && detail[..percentEnd].All(char.IsDigit))
+        {
+            detail = detail[(percentEnd + 1)..].TrimStart(' ', '-');
+        }
+        if (detail.Length == 0) return "";
+
+        static string Comparable(string text) => text.Trim().TrimEnd('.', '…').ToLowerInvariant();
+        string comparableDetail = Comparable(detail);
+        string comparableTitle = Comparable(title);
+        if (comparableTitle.StartsWith(comparableDetail, StringComparison.Ordinal)
+            || comparableDetail.StartsWith(comparableTitle, StringComparison.Ordinal)
+            || comparableDetail is "getting ready" or "finishing up" or "stopped")
+        {
+            return "";
+        }
+        return char.ToUpperInvariant(detail[0]) + detail[1..];
     }
 
     private void OnIslandActivated()

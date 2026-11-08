@@ -37,6 +37,12 @@ public sealed class JobSession : IDisposable
     /// <summary>A short line for the current moment, such as "42%  -  about 3 min left".</summary>
     public string StatusLabel { get; private set; } = "Getting ready…";
 
+    /// <summary>0..1 within the step that is running now, or null while that step cannot tell.</summary>
+    public double? ActiveStepFraction { get; private set; }
+
+    /// <summary>The id of the step that is running now (see JobPipeline.StepsFor).</summary>
+    public string? ActiveStepId { get; private set; }
+
     /// <summary>The title of the step that is running now, such as "Transcribe".</summary>
     public string ActiveStepTitle { get; private set; } = "Getting ready";
 
@@ -130,6 +136,8 @@ public sealed class JobSession : IDisposable
         if (update.State == StepState.Active)
         {
             ActiveStepTitle = stepTitle;
+            ActiveStepFraction = update.Fraction;
+            ActiveStepId = update.StepId;
             StatusLabel = string.IsNullOrWhiteSpace(update.Detail) ? stepTitle : update.Detail;
         }
         else if (update.State == StepState.Done)

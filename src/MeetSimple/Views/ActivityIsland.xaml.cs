@@ -96,7 +96,7 @@ public partial class ActivityIsland : UserControl
         currentState = state;
         TitleText.Text = title;
         DetailText.Text = detail;
-        AutomationProperties.SetName(Shell, $"{title}. {detail}");
+        AutomationProperties.SetName(Shell, detail.Length > 0 ? $"{title}. {detail}" : title);
 
         double ringTarget = state == IslandState.Done ? 1.0 : Math.Clamp(fraction ?? RingFraction, 0.0, 1.0);
         PercentText.Text = state == IslandState.Working && fraction != null ? $"{(int)(ringTarget * 100)}%" : "";
@@ -124,6 +124,7 @@ public partial class ActivityIsland : UserControl
 
         // Like a finished timer on a phone, lift for a moment to announce the result, then settle back.
         if (justEnded && IsShown) Announce();
+        Relayout();
     }
 
     // ----- transitions -----
@@ -269,7 +270,9 @@ public partial class ActivityIsland : UserControl
         double settledExpansion = Math.Clamp(expansion, 0.0, 1.0);
 
         double pillWidth = Math.Min(RestingWidth + LiftExtraWidth * lift, stageWidth - 32.0);
-        double pillHeight = RestingHeight + LiftExtraHeight * lift;
+        // With nothing extra to say, hovering only grows the pill a little instead of opening an empty line.
+        bool hasDetail = DetailText.Text.Length > 0;
+        double pillHeight = RestingHeight + (hasDetail ? LiftExtraHeight : LiftExtraHeight / 3.0) * lift;
         double pillLeft = (stageWidth - pillWidth) / 2.0;
         double pillTop = stageHeight - BottomGap - pillHeight;
 
@@ -296,7 +299,7 @@ public partial class ActivityIsland : UserControl
         // The detail line takes its room with the shape, but its text only appears in the last part of the opening
         // (and leaves first when closing), so words never squeeze into a pill that is still too small for them.
         double liftAmount = Math.Clamp(lift, 0.0, 1.0);
-        DetailText.Height = 15.0 * liftAmount;
+        DetailText.Height = hasDetail ? 15.0 * liftAmount : 0.0;
         DetailText.Opacity = Math.Clamp((liftAmount - 0.45) / 0.55, 0.0, 1.0);
 
         // A lifted pill sits a little higher off the page.

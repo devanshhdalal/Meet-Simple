@@ -73,6 +73,7 @@ flowchart LR
 - WASAPI loopback sends no data during silence, so `TrackWriter` pads silence to keep both tracks aligned.
 
 ## Conventions
+- **UI copy: less is more.** Never show the same fact twice on one surface (title vs detail vs progress ring). Say only what matters right now; drop text that restates a label, and leave a line out rather than fill it. Example: the island shows "Transcribing", the ring shows the percentage, and the hover line adds only "About 12 min left".
 - Meaningful names only (no single-character variables). Long-running work stays off the UI thread; UI updates go through `Dispatcher`.
 - Public docs at repo root: `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and this file.
 
