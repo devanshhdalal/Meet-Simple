@@ -1,0 +1,16 @@
+bin/
+obj/
+publish/
+*.zip
+*.user
+.vs/
+*.suo
+# Never commit recordings, transcripts, models or settings
+*.wav
+*.mp3
+*.mp4
+*.m4a
+*.bin
+*_transcript.txt
+*_summary.txt
+settings.json

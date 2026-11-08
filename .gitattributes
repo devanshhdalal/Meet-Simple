@@ -1,0 +1,5 @@
+# Normalise line endings; keep Windows batch files CRLF so they run correctly.
+* text=auto
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf

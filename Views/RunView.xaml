@@ -1,0 +1,31 @@
+<UserControl x:Class="MeetSimple.Views.RunView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="32,30,32,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Working on it" FontSize="24" FontWeight="Bold" />
+        <TextBlock Grid.Row="1" x:Name="SubtitleText" FontSize="14" Foreground="{DynamicResource MutedBrush}"
+                   Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+
+        <Border Grid.Row="2" Style="{StaticResource PanelBorder}" Margin="0,22,0,0" Padding="22,10">
+            <StackPanel x:Name="StepsPanel" />
+        </Border>
+
+        <StackPanel Grid.Row="3" Margin="0,16,0,0">
+            <TextBlock x:Name="MessageText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"
+                       Text="You can leave this running. Longer recordings take a while." />
+            <TextBlock x:Name="ElapsedText" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="4" x:Name="ButtonBar" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="CancelButton" Content="Cancel" Style="{StaticResource QuietButton}" Click="OnCancelClick" />
+        </StackPanel>
+    </Grid>
+</UserControl>
