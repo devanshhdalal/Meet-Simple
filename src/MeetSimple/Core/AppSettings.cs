@@ -32,6 +32,10 @@ public sealed class AppSettings
     public string SummaryModel { get; set; } = "llama3.1:8b";
     public string Language { get; set; } = "";
 
+    /// <summary>Microphone and output recorded by "Record a meeting" ("" = the Windows default). Set from the record screen.</summary>
+    public string RecordMicrophoneId { get; set; } = "";
+    public string RecordComputerAudioId { get; set; } = "";
+
     /// <summary>"system" (follow Windows, the default), "light" or "dark".</summary>
     public string Theme { get; set; } = "system";
 
@@ -54,7 +58,13 @@ public sealed class AppSettings
         Language = Catalog.NormalizeLanguage(Language);
         if (Theme != "light" && Theme != "dark") Theme = "system";
         if (!Theming.SpaceManager.IsKnown(Space)) Space = Theming.SpaceManager.DefaultId;
+        RecordMicrophoneId = CleanDeviceId(RecordMicrophoneId);
+        RecordComputerAudioId = CleanDeviceId(RecordComputerAudioId);
     }
+
+    /// <summary>Windows endpoint ids look like "{0.0.1.00000000}.{guid}"; anything else is dropped.</summary>
+    private static string CleanDeviceId(string? deviceId) =>
+        deviceId is { Length: > 0 and <= 200 } && deviceId.StartsWith("{0.0.", StringComparison.Ordinal) ? deviceId : "";
 
     private static AppSettings Load()
     {

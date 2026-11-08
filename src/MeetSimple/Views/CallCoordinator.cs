@@ -23,12 +23,23 @@ public sealed class CallCoordinator : IDisposable
     private DetectedCall? promptedCall;
     private AudioRecorder? recorder;
     private DetectedCall? recordedCall;
+    private System.Windows.Threading.DispatcherTimer? endingTimer;
+    private int endingSecondsLeft;
+    private bool keepUntilStopped;
+
+    /// <summary>
+    /// How long a recorded call may stay quiet before recording stops, after the watcher's own 8 s. A call app gives
+    /// no signal at all while nobody talks and the person uses push-to-talk or mute (Discord), so silence is only a
+    /// hint: the island asks "Call ended?" and counts down, and any sign of the call coming back cancels it.
+    /// </summary>
+    private const int EndingCountdownSeconds = 20;
 
     public CallCoordinator(MainWindow mainWindow)
     {
         this.mainWindow = mainWindow;
         watcher.CallStarted += OnCallStarted;
         watcher.CallEnded += OnCallEnded;
+        watcher.CallDevicesChanged += OnCallDevicesChanged;
         trayIcon.OpenRequested += () => mainWindow.ShowFromTray();
         trayIcon.QuitRequested += () => mainWindow.RequestQuit();
         trayIcon.WatchToggled += watching =>
@@ -92,6 +103,14 @@ public sealed class CallCoordinator : IDisposable
 
     private void OnCallStarted(DetectedCall call)
     {
+        // The call being recorded came back (someone spoke, push-to-talk): carry on with the same recording.
+        if (IsRecording && recordedCall?.AppName == call.AppName)
+        {
+            recordedCall = call;
+            CancelEndingCountdown();
+            return;
+        }
+
         // Already recording (here or in the app), or already asking about another call: stay quiet.
         if (IsRecording || mainWindow.IsRecordingInApp || prompt != null) return;
 
@@ -100,6 +119,13 @@ public sealed class CallCoordinator : IDisposable
         prompt.RecordClicked += () => StartRecording(call);
         prompt.NotNowClicked += ClosePrompt;
         prompt.StopClicked += StopRecording;
+        prompt.KeepRecordingClicked += () =>
+        {
+            // Recording now only stops on stop, or when the call app quits.
+            keepUntilStopped = true;
+            CancelEndingCountdown();
+            AppHealth.LogEvent("Call recording kept going by the user after the call went quiet.");
+        };
         prompt.Closed += (_, _) =>
         {
             prompt = null;
@@ -144,13 +170,30 @@ public sealed class CallCoordinator : IDisposable
         RefreshTray();
     }
 
+    /// <summary>The call moved to a headset or another output: the recording follows it, in the same files.</summary>
+    private void OnCallDevicesChanged(DetectedCall call)
+    {
+        if (!IsRecording || recorder == null || recordedCall?.Id != call.Id) return;
+        recordedCall = call;
+        if (call.MicrophoneDeviceId is { } microphoneId && microphoneId != recorder.Microphone?.Id)
+        {
+            recorder.SwitchMicrophone(microphoneId);
+        }
+        if (call.SpeakerDeviceId is { } speakerId && speakerId != recorder.ComputerAudio?.Id)
+        {
+            recorder.SwitchComputerAudio(speakerId);
+        }
+    }
+
     // ----- the call ends: stop and offer what to do -----
 
-    private void OnCallEnded(DetectedCall call)
+    private void OnCallEnded(DetectedCall call, bool isCertain)
     {
-        if (recordedCall?.Id == call.Id)
+        if (IsRecording && recordedCall != null && (recordedCall.Id == call.Id || recordedCall.AppName == call.AppName))
         {
-            StopRecording();
+            // Certain (app closed, call connection closed): stop now. Only quiet: ask with a countdown first.
+            if (isCertain) StopRecording();
+            else if (!keepUntilStopped) BeginEndingCountdown();
         }
         else if (promptedCall?.Id == call.Id && !IsRecording)
         {
@@ -158,8 +201,39 @@ public sealed class CallCoordinator : IDisposable
         }
     }
 
+    private void BeginEndingCountdown()
+    {
+        if (endingTimer != null) return;
+        endingSecondsLeft = EndingCountdownSeconds;
+        prompt?.ShowEnding(endingSecondsLeft);
+        endingTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        endingTimer.Tick += (_, _) =>
+        {
+            endingSecondsLeft--;
+            if (endingSecondsLeft <= 0)
+            {
+                AppHealth.LogEvent("Call recording stopped: the call stayed quiet through the countdown.");
+                StopRecording();
+                return;
+            }
+            prompt?.ShowEnding(endingSecondsLeft);
+        };
+        endingTimer.Start();
+    }
+
+    private void CancelEndingCountdown()
+    {
+        if (endingTimer == null) return;
+        endingTimer.Stop();
+        endingTimer = null;
+        if (IsRecording && recorder is { } activeRecorder) prompt?.ShowRecording(() => activeRecorder.Elapsed);
+    }
+
     private void StopRecording()
     {
+        endingTimer?.Stop();
+        endingTimer = null;
+        keepUntilStopped = false;
         var callRecorder = recorder;
         var call = recordedCall;
         string? folder = RecordingFolder;

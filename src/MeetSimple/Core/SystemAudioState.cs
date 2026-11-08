@@ -126,6 +126,61 @@ internal static class SystemAudioState
         return table;
     }
 
+    // ----- network -----
+
+    /// <summary>Ports used by system discovery protocols (mDNS, LLMNR, SSDP, NetBIOS), never a call's media connection.</summary>
+    private static readonly HashSet<int> DiscoveryPorts = new() { 137, 138, 1900, 3702, 5353, 5355 };
+
+    /// <summary>
+    /// Open UDP sockets with the process that owns them (the same list "netstat -ano -p udp" shows). Calls carry
+    /// voice over UDP, and that socket stays open for exactly as long as the call - silent or not. Only which
+    /// sockets exist is read, never any traffic.
+    /// </summary>
+    public static List<(int ProcessId, string Endpoint)> UdpSockets()
+    {
+        var sockets = new List<(int, string)>();
+        AddUdpSockets(InterNetwork, 12, sockets);
+        AddUdpSockets(InterNetworkV6, 28, sockets);
+        return sockets;
+    }
+
+    private static void AddUdpSockets(int addressFamily, int rowSize, List<(int, string)> sockets)
+    {
+        int bufferSize = 0;
+        IntPtr table = IntPtr.Zero;
+        try
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                uint result = GetExtendedUdpTable(table, ref bufferSize, false, addressFamily, UdpTableOwnerProcess, 0);
+                if (result == 0) break;
+                if (result != InsufficientBuffer) return;
+                if (table != IntPtr.Zero) Marshal.FreeHGlobal(table);
+                table = Marshal.AllocHGlobal(bufferSize);
+                if (attempt == 2) return;
+            }
+            if (table == IntPtr.Zero) return;
+
+            int rowCount = Marshal.ReadInt32(table);
+            // IPv4 row: address, port, process. IPv6 row: 16-byte address, scope, port, process.
+            int portOffset = addressFamily == InterNetwork ? 4 : 20;
+            int processOffset = addressFamily == InterNetwork ? 8 : 24;
+            string family = addressFamily == InterNetwork ? "v4" : "v6";
+            for (int index = 0; index < rowCount; index++)
+            {
+                IntPtr row = table + 4 + index * rowSize;
+                int rawPort = Marshal.ReadInt32(row, portOffset);
+                int port = ((rawPort & 0xFF) << 8) | ((rawPort >> 8) & 0xFF); // network byte order
+                if (port < 1024 || DiscoveryPorts.Contains(port)) continue;
+                sockets.Add((Marshal.ReadInt32(row, processOffset), $"{family}:{port}"));
+            }
+        }
+        finally
+        {
+            if (table != IntPtr.Zero) Marshal.FreeHGlobal(table);
+        }
+    }
+
     // ----- window titles -----
 
     /// <summary>Titles of the visible top-level windows that belong to the given processes (a browser shows its active tab).</summary>
@@ -223,6 +278,15 @@ internal static class SystemAudioState
     }
 
     // ----- process and window functions -----
+
+    private const int InterNetwork = 2;
+    private const int InterNetworkV6 = 23;
+    private const int UdpTableOwnerProcess = 1;
+    private const uint InsufficientBuffer = 122;
+
+    [DllImport("iphlpapi.dll")]
+    private static extern uint GetExtendedUdpTable(IntPtr table, ref int size, [MarshalAs(UnmanagedType.Bool)] bool sorted,
+        int addressFamily, int tableClass, int reserved);
 
     private const int SnapshotProcesses = 0x00000002;
     private static readonly IntPtr InvalidHandle = new(-1);

@@ -46,6 +46,7 @@ public partial class CallPromptWindow : Window
     public event Action? RecordClicked;
     public event Action? NotNowClicked;
     public event Action? StopClicked;
+    public event Action? KeepRecordingClicked;
 
     /// <summary>Shows the question for a call that just started.</summary>
     public void Ask(string callName)
@@ -64,10 +65,17 @@ public partial class CallPromptWindow : Window
         answerTimer.Stop();
         elapsedSource = elapsed;
         UpdateClock();
+        bool wasEnding = EndingPanel.Visibility == Visibility.Visible;
         AskPanel.Visibility = Visibility.Collapsed;
+        EndingPanel.Visibility = Visibility.Collapsed;
         RecordingPanel.Visibility = Visibility.Visible;
         clockTimer.Start();
         if (!Motion.Enabled) return;
+        if (wasEnding)
+        {
+            Settle();
+            return;
+        }
 
         // The pill gives a little as it changes shape, like the island settling around new content.
         PillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
@@ -79,6 +87,23 @@ public partial class CallPromptWindow : Window
             AutoReverse = true,
             RepeatBehavior = RepeatBehavior.Forever,
         });
+    }
+
+    /// <summary>The call has gone quiet: "Call ended? · Stopping in 20" with Keep recording. Call again each second.</summary>
+    public void ShowEnding(int secondsLeft)
+    {
+        EndingText.Text = $"Call ended? · Stopping in {secondsLeft}";
+        if (EndingPanel.Visibility == Visibility.Visible) return;
+        RecordingPanel.Visibility = Visibility.Collapsed;
+        EndingPanel.Visibility = Visibility.Visible;
+        if (Motion.Enabled) Settle();
+    }
+
+    /// <summary>The pill gives a little as its content changes, like the island settling around new content.</summary>
+    private void Settle()
+    {
+        PillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(0.86, 1.0, new Duration(TimeSpan.FromMilliseconds(520))) { EasingFunction = MorphSpring });
     }
 
     /// <summary>Rises back into the top edge, then closes.</summary>
@@ -143,6 +168,8 @@ public partial class CallPromptWindow : Window
     }
 
     private void OnStopClick(object sender, RoutedEventArgs e) => StopClicked?.Invoke();
+
+    private void OnKeepRecordingClick(object sender, RoutedEventArgs e) => KeepRecordingClicked?.Invoke();
 
     /// <summary>Clicking the pill must never pull the keyboard away from the call (no activation, no taskbar or Alt+Tab entry).</summary>
     private void MakeNonActivating()

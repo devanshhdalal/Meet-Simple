@@ -588,6 +588,10 @@ public partial class MainWindow : Window
         {
             items.Add($"  •  Speech recognition: {Catalog.LabelFor(Catalog.SpeechModels, request.SpeechModel)}");
         }
+        if (!File.Exists(SpeechModelStore.VoiceDetectorPath))
+        {
+            items.Add("  •  Voice detector, so only speech is transcribed (1 MB)");
+        }
 
         if (request.Mode == JobMode.TranscribeAndSummarize)
         {

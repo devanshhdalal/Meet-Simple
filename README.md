@@ -24,8 +24,10 @@ Nothing is uploaded. Speech recognition runs locally with [Whisper](https://gith
 2. Unzip and open the **`MeetSimple`** folder.  
 3. Double-click **`MeetSimple.exe`**.
 
-**Transcribe only** works without installing anything else (first run downloads a speech model after you agree).  
+**Transcribe only** works without installing anything else (first run downloads a 574 MB speech model after you agree).  
 **Transcribe + summarize** needs a local summary engine: the app can download and run the **[Ollama](https://ollama.com) installer** (a separate third-party product from Ollama Inc.) after you confirm, then pull a summary model through Ollama on localhost. You can also install Ollama yourself first.
+
+Before testing, check [Requirements](#requirements): transcription needs about 8 GB of RAM and a 0.7 GB download; summaries need about 16 GB of RAM and roughly 7 GB of downloads.
 
 Only record calls when everyone involved agrees — laws and policies vary.
 
@@ -67,18 +69,47 @@ Only record calls when everyone involved agrees — laws and policies vary.
 
 ## Requirements
 
+Everything runs on your PC, so your PC does the work. Here is what it needs and what it downloads.
+
+### Your PC
+
+| | Transcribe only | Transcribe + summarize |
+| --- | --- | --- |
+| **OS** | Windows 10 or 11, x64 | Same |
+| **CPU** | x64 with **AVX2, FMA and F16C** (most CPUs from 2015 on) | Same; more cores = faster |
+| **RAM** | **8 GB** (the speech model uses about 2–4 GB while transcribing) | **16 GB** for the default Llama 3.1 8B; **8 GB** works with the lighter Llama 3.2 3B (pick it in Settings) |
+| **GPU** | Optional. A Vulkan-capable GPU makes transcription much faster | Optional. Ollama uses an NVIDIA or AMD GPU with **6 GB+ VRAM** for the 8B model; without one it runs on the CPU, slower |
+| **Free disk** | **About 1 GB**, plus room for recordings | **About 10 GB** (Ollama, the summary model and the speech model) |
+| **Internet** | Only for the first-run downloads below | Same |
+
+Transcription and summarizing run one after another, not at the same time. Speed depends heavily on hardware: on a CPU alone, expect transcription to take a good fraction of the meeting's length; a GPU is several times faster. We don't publish reference timings yet. If you time one, please open an issue with your CPU/GPU and numbers.
+
+**Recordings** take about **0.7 GB per hour** (two tracks, You and Others). Recording won't start with less than 2 GB free, and every large download checks free space first.
+
+### What downloads on first run
+
+Nothing downloads until you agree. Each item downloads once and is reused, including across app updates.
+
+| What | When | Size | Stored in |
+| --- | --- | --- | --- |
+| **Meet Simple** (this zip) | You download it | ~100 MB (~140 MB unzipped) | Wherever you unzip it |
+| **Speech model** (Whisper large-v3-turbo, q5_0) | First transcription | **574 MB** | `%LOCALAPPDATA%\MeetSimple\models\` |
+| **Voice detector** (Silero VAD) | First transcription | Under 1 MB | Same folder |
+| **Ollama installer** | First summary, only if Ollama isn't installed | Roughly **1–1.5 GB** (varies by Ollama release; it bundles GPU runtimes) | Ollama installs into your user profile |
+| **Summary model** (Llama 3.1 8B) | First summary | **About 5 GB** (Llama 3.2 3B: about 2 GB) | Ollama's model store (`%USERPROFILE%\.ollama\models`) |
+
+**Totals:** transcribe only is about **0.7 GB** to download. Adding summaries brings it to about **7 GB** downloaded and **10 GB** on disk. After that, Meet Simple works fully offline.
+
+Other speech models can be picked in Settings, from Tiny (75 MB, fastest, least accurate) to Large (3 GB, most accurate, slowest).
+
+### Also needed
+
 | | |
 | --- | --- |
-| **OS** | Windows 10 or 11, **x64** (Whisper.net’s docs list Windows 11+; we still aim to support Windows 10 — please file an issue if a Win10 box fails) |
-| **CPU** | x64 with **AVX, AVX2, FMA, and F16C** (the default Whisper.net CPU runtime). We do not currently ship the separate NoAvx runtime. |
-| **GPU** | Optional. Vulkan can speed transcription up when available; otherwise CPU works. |
-| **Disk (ballpark)** | Default speech model `large-v3-turbo-q5_0` ≈ **574 MB**. Larger Whisper cuts are up to ~3 GB. Summary models are separate (e.g. Llama 3.1 8B ≈ 5 GB via Ollama). Keep several GB free before the first summarize setup. |
-| **RAM (ballpark)** | Plan on roughly **2–4 GB** free for the default turbo speech model while it runs; full `large-v3` and 8B summary models need more (often **6–10 GB+** combined). |
-| **Speed** | Hardware-dependent. Prefer a Vulkan-capable GPU when you can; CPU-only works but is slower. Exact “30-minute meeting → X minutes” numbers vary by CPU/GPU and model — open an issue with your timing if you measure one. |
-| **VC++** | [Visual C++ 2022 x64 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) — the zip is self-contained for .NET, but Whisper’s native libraries may still need this. |
-| **Summaries** | [Ollama](https://ollama.com) (third-party) + a pulled model. Meet Simple can install Ollama for you after you agree, or you can install it yourself. Not required for transcription-only. |
+| **VC++** | [Visual C++ 2022 x64 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist). The zip includes .NET, but Whisper's native libraries may still need this. Most PCs already have it. |
+| **Summaries** | [Ollama](https://ollama.com) (a separate third-party product). Meet Simple can install it for you after you agree, or you can install it yourself first. Not needed for transcription only. |
 
-Models are downloaded once (speech under `%LOCALAPPDATA%\MeetSimple\models\`, summaries into Ollama’s store) and reused across app updates.
+Windows 11 is the most tested. Windows 10 is supported but less exercised; please file an issue if a Windows 10 PC fails. We don't ship the no-AVX Whisper runtime yet, so very old CPUs without AVX2 can't transcribe.
 
 ---
 

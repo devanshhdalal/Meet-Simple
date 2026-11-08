@@ -96,7 +96,7 @@ public partial class TutorialWindow : Window, IDisposable
     private void StartMeters()
     {
         MetersPanel.Visibility = Visibility.Visible;
-        meterRecorder = new AudioRecorder();
+        meterRecorder = new AudioRecorder(AppSettings.Current.RecordMicrophoneId, AppSettings.Current.RecordComputerAudioId);
         meterRecorder.StartMonitoring();
         Meters.Attach(meterRecorder);
     }

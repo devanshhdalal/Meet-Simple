@@ -4,7 +4,8 @@ using NAudio.Wave.SampleProviders;
 
 namespace MeetSimple.Core;
 
-public sealed record PreparedAudio(string WavPath, TimeSpan Duration, float Peak);
+/// <summary>The converted audio, plus where it has a voice (see SpeechMap).</summary>
+public sealed record PreparedAudio(string WavPath, TimeSpan Duration, float Peak, SpeechMap Speech);
 
 /// <summary>Turns any audio/video file (MP4, MOV, MP3, WAV...) into the 16 kHz mono WAV that Whisper needs.</summary>
 public static class AudioPreparer
@@ -26,6 +27,10 @@ public static class AudioPreparer
         var shortBuffer = new short[floatBuffer.Length];
         float peak = 0f;
         long totalSamples = 0;
+        // Loudness of every 30 ms slice, measured while converting (no second pass over the audio).
+        var frameDecibels = new List<float>();
+        double frameEnergy = 0.0;
+        int frameFill = 0;
 
         for (int partIndex = 0; partIndex < sourcePaths.Count; partIndex++)
         {
@@ -45,6 +50,13 @@ public static class AudioPreparer
                     float sample = floatBuffer[index];
                     float magnitude = Math.Abs(sample);
                     if (magnitude > peak) peak = magnitude;
+                    frameEnergy += sample * sample;
+                    if (++frameFill == SpeechMap.FrameSamples)
+                    {
+                        frameDecibels.Add(ToDecibels(frameEnergy, frameFill));
+                        frameEnergy = 0.0;
+                        frameFill = 0;
+                    }
                     shortBuffer[index] = (short)Math.Clamp(sample * 32767f, -32768f, 32767f);
                 }
                 writer.WriteSamples(shortBuffer, 0, samplesRead);
@@ -58,8 +70,14 @@ public static class AudioPreparer
         {
             throw new InvalidOperationException("No audio could be read from this file.");
         }
-        return new PreparedAudio(wavOutputPath, TimeSpan.FromSeconds((double)totalSamples / WhisperSampleRate), peak);
+        if (frameFill > 0) frameDecibels.Add(ToDecibels(frameEnergy, frameFill));
+        return new PreparedAudio(wavOutputPath, TimeSpan.FromSeconds((double)totalSamples / WhisperSampleRate), peak,
+            new SpeechMap(frameDecibels));
     }
+
+    /// <summary>Root-mean-square level in dB relative to full scale (digital silence is about -120).</summary>
+    private static float ToDecibels(double energy, int sampleCount) =>
+        (float)(10.0 * Math.Log10(energy / sampleCount + 1e-12));
 
     /// <summary>Opens the file and turns the cryptic errors Windows media decoders give into something a person can act on.</summary>
     private static AudioFileReader OpenReader(string sourcePath)

@@ -10,7 +10,8 @@ public partial class RecordView : UserControl, IDisposable
 {
     private readonly MainWindow shell;
     private readonly JobMode mode;
-    private readonly AudioRecorder recorder = new();
+    // The devices last picked on this screen (falling back to the Windows defaults when they are unplugged).
+    private readonly AudioRecorder recorder = new(AppSettings.Current.RecordMicrophoneId, AppSettings.Current.RecordComputerAudioId);
     private readonly DispatcherTimer clockTimer;
     private string sessionFolder = "";
 

@@ -64,6 +64,18 @@
                             Background="{DynamicResource IslandErrorBrush}" Click="OnRecordClick" />
                 </StackPanel>
 
+                <!-- The call went quiet while recording: count down, unless the person wants to keep going -->
+                <StackPanel x:Name="EndingPanel" Orientation="Horizontal" Visibility="Collapsed">
+                    <TextBlock x:Name="EndingText" Margin="11,0,16,0" VerticalAlignment="Center" FontWeight="SemiBold"
+                               Typography.NumeralAlignment="Tabular" Foreground="{DynamicResource IslandTextBrush}" />
+                    <Button x:Name="KeepRecordingButton" Content="Keep recording" Style="{StaticResource IslandButton}"
+                            Margin="0,0,6,0" Click="OnKeepRecordingClick" />
+                    <Button Style="{StaticResource IslandButton}" Padding="13,9" ToolTip="Stop now"
+                            AutomationProperties.Name="Stop recording now" Click="OnStopClick">
+                        <Rectangle Width="10" Height="10" RadiusX="2" RadiusY="2" Fill="{DynamicResource IslandTextBrush}" />
+                    </Button>
+                </StackPanel>
+
                 <!-- Recording: a live dot, the time, and stop -->
                 <StackPanel x:Name="RecordingPanel" Orientation="Horizontal" Visibility="Collapsed">
                     <Ellipse x:Name="RecordingDot" Width="10" Height="10" Margin="9,0,10,0" VerticalAlignment="Center"

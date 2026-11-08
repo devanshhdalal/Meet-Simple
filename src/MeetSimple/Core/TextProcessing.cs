@@ -41,20 +41,87 @@ public static class TextProcessing
         return wrappedInBrackets || trimmed.All(character => !char.IsLetterOrDigit(character));
     }
 
-    /// <summary>Whisper sometimes loops the same sentence over silence; drop the third and later identical repeats.</summary>
+    /// <summary>Lines from the subtitle files Whisper learned from; never something said in a meeting.</summary>
+    private static readonly string[] SubtitleCredits =
+    {
+        "closed captioning", "captioning by", "captioned by", "captions by", "subtitles by", "subtitled by", "subtitle by",
+        "transcribed by", "transcription by", "transcript by", "translated by", "translation by", "amara.org",
+        "subtitles made by", "sync and corrections", "opensubtitles", "the amara.org community",
+    };
+
+    /// <summary>The short lines Whisper invents most often over silence or a single sound.</summary>
+    private static readonly HashSet<string> ShortInventions = new(StringComparer.Ordinal)
+    {
+        "thank you", "thanks", "thank you very much", "thank you so much", "thanks for listening", "bye", "bye bye",
+        "you", "so", "the end", "okay", "ok", "hmm", "uh", "oh",
+    };
+
+    /// <summary>Video outros Whisper also invents over silence; people can say these, so they only go when no one is talking.</summary>
+    private static readonly string[] VideoOutros =
+    {
+        "thanks for watching", "thank you for watching", "thank you so much for watching", "please subscribe",
+        "like and subscribe", "don't forget to subscribe", "see you in the next video", "see you next time",
+    };
+
+    /// <summary>
+    /// True for text Whisper made up rather than heard. Three independent checks:
+    /// almost no voice under the passage (from the audio itself); Whisper's own "this was probably not speech" score
+    /// in quiet audio; and the subtitle credits and outros it is known to invent.
+    /// </summary>
+    public static bool IsInventedText(string text, double voicedFraction, double loudSeconds, double noSpeechProbability)
+    {
+        if (voicedFraction < 0.1) return true;
+        // A beep or a click is not words: every real passage has at least a quarter of a second of sound.
+        if (loudSeconds < 0.25) return true;
+        // Whisper's favourite one-liners over near-silence. Said for real, they sit on plenty of voice and stay.
+        if (voicedFraction < 0.5 && ShortInventions.Contains(Normalize(text))) return true;
+        if (noSpeechProbability >= 0.6 && voicedFraction < 0.3) return true;
+
+        string lower = text.ToLowerInvariant();
+        if (SubtitleCredits.Any(credit => lower.Contains(credit, StringComparison.Ordinal))) return true;
+        if (lower.Contains('@') && lower.Contains('.')) return true; // a credit's e-mail address
+        return voicedFraction < 0.6 && VideoOutros.Any(outro => lower.Contains(outro, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Whisper sometimes repeats itself over silence: the same sentence back to back, or a sentence from a little
+    /// earlier coming back after a pause. Drops the third and later back-to-back repeats, and any passage of four or
+    /// more words that repeats one from the last minute (people rarely say a whole sentence twice).
+    /// </summary>
     public static List<TranscriptSegment> RemoveRepetitionLoops(IEnumerable<TranscriptSegment> segments)
     {
         var kept = new List<TranscriptSegment>();
+        var recent = new List<(TimeSpan Start, string Normalized)>();
         string previousText = "";
         int repeatCount = 0;
         foreach (var segment in segments)
         {
-            string normalized = segment.Text.Trim().ToLowerInvariant();
+            string normalized = Normalize(segment.Text);
             repeatCount = normalized == previousText ? repeatCount + 1 : 0;
             previousText = normalized;
-            if (repeatCount < 2) kept.Add(segment);
+            if (repeatCount >= 2) continue;
+
+            recent.RemoveAll(item => segment.Start - item.Start > TimeSpan.FromMinutes(1));
+            bool isLongEcho = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 4
+                              && recent.Any(item => item.Normalized == normalized);
+            if (isLongEcho) continue;
+
+            kept.Add(segment);
+            recent.Add((segment.Start, normalized));
         }
         return kept;
+    }
+
+    /// <summary>Lower case, letters and digits only, single spaces: "Okay, I think..." and "okay i think" match.</summary>
+    private static string Normalize(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (char character in text.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(character)) builder.Append(character);
+            else if (char.IsWhiteSpace(character) && builder.Length > 0 && builder[^1] != ' ') builder.Append(' ');
+        }
+        return builder.ToString().Trim();
     }
 
     /// <summary>

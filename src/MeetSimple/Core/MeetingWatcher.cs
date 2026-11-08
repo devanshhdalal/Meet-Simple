@@ -22,11 +22,15 @@ public sealed record DetectedCall(string Id, string AppName, string? MicrophoneD
 /// traced back to their app). Holding the microphone starts a call, but does not have to last: Discord with
 /// push-to-talk or self-mute lets go of it between words. So once a call has been announced, a dedicated call app
 /// that is still playing call audio counts as still in the call. Browsers do not get this (a video playing after a
-/// Meet call would otherwise keep a recording going for ever). How long it waits before asking depends on how sure it is: a dedicated call app
-/// (Discord, Teams, Zoom...) or a browser on a meeting page after a moment; a browser on any other page longer,
-/// because voice typing looks the same. Ending is deliberately slower than starting: a call that is announced must
-/// let go of the microphone for several seconds (muting, switching headsets) unless the app has quit outright,
-/// because stopping a recording too early loses the meeting while stopping a little late only adds silence.
+/// Meet call would otherwise keep a recording going for ever).
+///
+/// The steadiest "still in the call" signal is the app's network connections: voice travels over UDP, and the call
+/// connection stays open whether anyone talks or not. Which socket is the voice one cannot be told from outside
+/// (Discord opens helper sockets that live under two minutes, and its voice socket only after the call starts), so
+/// every UDP socket the app holds during the call counts, and while any is open a quiet call stays alive. Leaving
+/// closes all of them: none for 3 s with no microphone ends the call for certain, as does the app quitting. For apps
+/// that keep sockets between calls, a long-standing one closing while the call is quiet raises the "Call ended?"
+/// question, as does a call that has been completely silent for 3 minutes.
 /// </summary>
 public sealed class MeetingWatcher : IDisposable
 {
@@ -37,6 +41,24 @@ public sealed class MeetingWatcher : IDisposable
     private static readonly TimeSpan UnannouncedEndGrace = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan AnnouncedEndGrace = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan SettleAfterChange = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>A socket that has been open this long and then closes during a quiet call suggests the call was left.</summary>
+    private static readonly TimeSpan LongLivedSocketAge = TimeSpan.FromMinutes(2);
+
+    /// <summary>No microphone and no call audio for this long asks "Call ended?" even with connections still open.</summary>
+    private static readonly TimeSpan QuietCap = TimeSpan.FromMinutes(3);
+
+    /// <summary>
+    /// Leaving a call closes all of the app's UDP sockets (Discord holds none outside a call). This long with none
+    /// open, and no microphone, means the call was left; the wait covers a reconnect to a new voice server.
+    /// </summary>
+    private static readonly TimeSpan NoConnectionGrace = TimeSpan.FromSeconds(3);
+
+    /// <summary>Using the microphone this long with no UDP socket means the call runs some other way (TCP relay).</summary>
+    private static readonly TimeSpan NoUdpCall = TimeSpan.FromSeconds(10);
+
+    /// <summary>A call app using another microphone or output for this long has moved there (recording follows).</summary>
+    private static readonly TimeSpan DeviceMoveSettle = TimeSpan.FromSeconds(3);
 
     private const uint NotifyOnSubkeyChange = 0x00000001;
     private const uint NotifyOnValueChange = 0x00000004;
@@ -71,6 +93,9 @@ public sealed class MeetingWatcher : IDisposable
     private readonly SynchronizationContext context;
     private readonly object gate = new();
     private readonly Dictionary<string, CallState> calls = new(StringComparer.Ordinal);
+
+    /// <summary>When each open UDP socket ("process|family:port") was first seen. Only touched by the watcher thread.</summary>
+    private readonly Dictionary<string, DateTime> socketFirstSeen = new(StringComparer.Ordinal);
     private readonly int ownProcessId = Environment.ProcessId;
     private readonly string ownProcessName =
         Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "MeetSimple").ToLowerInvariant();
@@ -85,8 +110,18 @@ public sealed class MeetingWatcher : IDisposable
     /// <summary>Raised on the creating thread once an app has held the microphone long enough to be a call.</summary>
     public event Action<DetectedCall>? CallStarted;
 
-    /// <summary>Raised on the creating thread when that app has let go of the microphone (or quit).</summary>
-    public event Action<DetectedCall>? CallEnded;
+    /// <summary>
+    /// Raised on the creating thread when the app has gone quiet (no microphone, no call audio) or has quit.
+    /// The flag is true when the end is certain (the app quit, or it closed all its connections); false when the app has
+    /// only gone quiet, which may be a silent moment in a call.
+    /// </summary>
+    public event Action<DetectedCall, bool>? CallEnded;
+
+    /// <summary>
+    /// An announced call moved to another microphone or output (headset plugged in, device changed in the call app).
+    /// Raised on the UI thread with the same call id and the new device ids.
+    /// </summary>
+    public event Action<DetectedCall>? CallDevicesChanged;
 
     public bool IsRunning
     {
@@ -192,6 +227,18 @@ public sealed class MeetingWatcher : IDisposable
         public string? MicrophoneDeviceId { get; set; }
         public string? SpeakerDeviceId { get; set; }
         public DetectedCall? Announced { get; set; }
+
+        /// <summary>The app's open UDP sockets during this call, with when each was first seen.</summary>
+        public Dictionary<string, DateTime> CallSockets { get; } = new(StringComparer.Ordinal);
+        public bool SocketsSeeded { get; set; }
+        public bool LongLivedSocketClosed { get; set; }
+
+        /// <summary>The app had a UDP socket open during this call, so all of them closing means it was left.</summary>
+        public bool HadSockets { get; set; }
+        public DateTime? SocketsGoneSince { get; set; }
+        public DateTime? QuietSince { get; set; }
+        public DateTime? DevicesDifferSince { get; set; }
+        public bool QuietLogged { get; set; }
     }
 
     /// <summary>Updates the calls being tracked. Returns true while anything is tracked (so checks stay frequent).</summary>
@@ -202,8 +249,10 @@ public sealed class MeetingWatcher : IDisposable
             var processes = SystemAudioState.Processes();
             var sightings = FindCalls(processes, out var callAppsPlayingAudio);
             var now = DateTime.UtcNow;
+            var socketsByCall = SocketsByCall(TrackUdpSockets(now), processes);
             var started = new List<DetectedCall>();
-            var ended = new List<DetectedCall>();
+            var moved = new List<DetectedCall>();
+            var ended = new List<(DetectedCall Call, bool IsCertain)>();
             bool tracking;
             lock (gate)
             {
@@ -231,6 +280,21 @@ public sealed class MeetingWatcher : IDisposable
                         state.AppName = sighting.AppName;
                     }
                     TimeSpan delay = state.IsCertainlyCall ? CertainCallDelay : UncertainCallDelay;
+                    bool devicesDiffer = state.Announced is { } announcedCall
+                        && (announcedCall.MicrophoneDeviceId != state.MicrophoneDeviceId || announcedCall.SpeakerDeviceId != state.SpeakerDeviceId);
+                    if (!devicesDiffer) state.DevicesDifferSince = null; else state.DevicesDifferSince ??= now;
+                    // Only a move that holds counts, so an app with sessions on two devices does not flip back and forth.
+                    if (state.Announced is { } announced && state.DevicesDifferSince is { } differSince && now - differSince >= DeviceMoveSettle)
+                    {
+                        state.DevicesDifferSince = null;
+                        state.Announced = announced with
+                        {
+                            MicrophoneDeviceId = state.MicrophoneDeviceId,
+                            SpeakerDeviceId = state.SpeakerDeviceId,
+                        };
+                        moved.Add(state.Announced);
+                        AppHealth.LogEvent($"Call devices changed: {state.AppName} now uses another microphone or output.");
+                    }
                     if (state.Announced == null && now - state.FirstSeen >= delay)
                     {
                         state.Announced = new DetectedCall(state.CallId, state.AppName, state.MicrophoneDeviceId, state.SpeakerDeviceId);
@@ -243,29 +307,84 @@ public sealed class MeetingWatcher : IDisposable
 
                 foreach (var (callKey, state) in calls.ToList())
                 {
-                    if (sightings.ContainsKey(callKey)) continue;
-                    // Microphone released, but the call app is still playing the call (push-to-talk, muted): still in it.
-                    if (state.Announced != null && callAppsPlayingAudio.Contains(callKey))
+                    UpdateCallSockets(callKey, state, socketsByCall, now);
+
+                    // Using the microphone: plainly in the call, and whatever happened to sockets meanwhile is forgiven.
+                    if (sightings.ContainsKey(callKey))
                     {
-                        state.LastSeen = now;
+                        state.QuietSince = null;
+                        state.LongLivedSocketClosed = false;
+                        if (state.SocketsGoneSince is { } goneWhileTalking && now - goneWhileTalking >= NoUdpCall)
+                        {
+                            state.SocketsGoneSince = null;
+                            state.HadSockets = false;
+                        }
                         continue;
                     }
-                    bool appQuit = !IsAppRunning(callKey, processes);
-                    TimeSpan grace = state.Announced == null ? UnannouncedEndGrace : AnnouncedEndGrace;
-                    if (!appQuit && now - state.LastSeen < grace) continue;
+
+                    string? endReason = null;
+                    bool isCertain = false;
+                    if (!IsAppRunning(callKey, processes))
+                    {
+                        endReason = $"{state.AppName} closed.";
+                        isCertain = true;
+                    }
+                    else if (state.Announced != null)
+                    {
+                        bool playingCallAudio = callAppsPlayingAudio.Contains(callKey);
+                        if (playingCallAudio) state.QuietSince = null; else state.QuietSince ??= now;
+
+                        if (state.SocketsGoneSince is { } goneSince)
+                        {
+                            // Muted or push-to-talk keeps the voice connection open; leaving closes every one.
+                            if (now - goneSince < NoConnectionGrace)
+                            {
+                                state.LastSeen = now;
+                                continue;
+                            }
+                            endReason = $"{state.AppName} let go of the microphone and closed all its connections (left the call).";
+                            isCertain = true;
+                        }
+                        else if (state.LongLivedSocketClosed)
+                        {
+                            endReason = $"{state.AppName} went quiet and closed a long-standing connection (probably left the call).";
+                        }
+                        else if (state.QuietSince is { } quietSince && now - quietSince >= QuietCap)
+                        {
+                            endReason = $"{state.AppName} has used no microphone and played no call audio for {QuietCap.TotalMinutes:0} minutes.";
+                        }
+                        else if (playingCallAudio || state.CallSockets.Count > 0)
+                        {
+                            // Push-to-talk, muted, or nobody talking: the call is still connected.
+                            state.LastSeen = now;
+                            if (!playingCallAudio && !state.QuietLogged)
+                            {
+                                state.QuietLogged = true;
+                                AppHealth.LogEvent($"Call quiet: {state.AppName} let go of the microphone; {state.CallSockets.Count} of its connections are still open.");
+                            }
+                            continue;
+                        }
+                    }
+
+                    if (endReason == null)
+                    {
+                        TimeSpan grace = state.Announced == null ? UnannouncedEndGrace : AnnouncedEndGrace;
+                        if (now - state.LastSeen < grace) continue;
+                        endReason = $"{state.AppName} used no microphone, played no call audio and had no open connection for {grace.TotalSeconds:0} s.";
+                    }
+
                     calls.Remove(callKey);
                     if (state.Announced != null)
                     {
-                        ended.Add(state.Announced);
-                        AppHealth.LogEvent(appQuit
-                            ? $"Call ended: {state.AppName} closed."
-                            : $"Call ended: {state.AppName} used no microphone and played no call audio for {grace.TotalSeconds:0} s.");
+                        ended.Add((state.Announced, isCertain));
+                        AppHealth.LogEvent("Call ended: " + endReason);
                     }
                 }
                 tracking = calls.Count > 0;
             }
             foreach (var call in started) context.Post(_ => CallStarted?.Invoke(call), null);
-            foreach (var call in ended) context.Post(_ => CallEnded?.Invoke(call), null);
+            foreach (var call in moved) context.Post(_ => CallDevicesChanged?.Invoke(call), null);
+            foreach (var (call, isCertain) in ended) context.Post(_ => CallEnded?.Invoke(call, isCertain), null);
             return tracking;
         }
         catch (Exception error) when (error is not OutOfMemoryException)
@@ -276,6 +395,90 @@ public sealed class MeetingWatcher : IDisposable
     }
 
     /// <summary>Apps holding a microphone right now that look like a call, keyed so that one app is always one call.</summary>
+    /// <summary>Updates when each UDP socket was first seen and returns the ones open now.</summary>
+    private HashSet<string> TrackUdpSockets(DateTime now)
+    {
+        var open = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (processId, endpoint) in SystemAudioState.UdpSockets())
+        {
+            if (processId == ownProcessId) continue;
+            string socketKey = $"{processId}|{endpoint}";
+            open.Add(socketKey);
+            socketFirstSeen.TryAdd(socketKey, now);
+        }
+        foreach (string closed in socketFirstSeen.Keys.Where(socketKey => !open.Contains(socketKey)).ToList())
+        {
+            socketFirstSeen.Remove(closed);
+        }
+        return open;
+    }
+
+    /// <summary>Open UDP sockets grouped by the call app that owns them (whichever of the app's processes holds them).</summary>
+    private static Dictionary<string, HashSet<string>> SocketsByCall(HashSet<string> openSockets, ProcessTable processes)
+    {
+        var byCall = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (string socketKey in openSockets)
+        {
+            int separator = socketKey.IndexOf('|');
+            if (!int.TryParse(socketKey.AsSpan(0, separator), out int processId)) continue;
+            if (processes.OwnerNameOf(processId) is not { } owner || ClassifyCallKey(owner) is not { } callKey) continue;
+            if (!callKey.StartsWith(AppKeyPrefix, StringComparison.Ordinal)) continue; // browsers: too much unrelated traffic
+            if (!byCall.TryGetValue(callKey, out var sockets)) byCall[callKey] = sockets = new HashSet<string>(StringComparer.Ordinal);
+            sockets.Add(socketKey);
+        }
+        return byCall;
+    }
+
+    /// <summary>
+    /// Keeps a call's socket list current. Which socket carries the voice cannot be told (Discord opens helpers that
+    /// live under two minutes, and its voice socket after the call starts), so only "none left" is trusted; a
+    /// long-standing one closing during a quiet stretch is a hint for apps that keep sockets open between calls.
+    /// </summary>
+    private void UpdateCallSockets(string callKey, CallState state, Dictionary<string, HashSet<string>> socketsByCall, DateTime now)
+    {
+        if (state.Announced == null || !callKey.StartsWith(AppKeyPrefix, StringComparison.Ordinal)) return;
+        var appSockets = socketsByCall.TryGetValue(callKey, out var open) ? open : new HashSet<string>();
+
+        var closedAges = new List<string>();
+        foreach (var (socketKey, firstSeen) in state.CallSockets.ToList())
+        {
+            if (appSockets.Contains(socketKey)) continue;
+            state.CallSockets.Remove(socketKey);
+            TimeSpan openFor = now - firstSeen;
+            closedAges.Add($"{openFor.TotalSeconds:0} s");
+            if (openFor >= LongLivedSocketAge && state.QuietSince != null) state.LongLivedSocketClosed = true;
+        }
+
+        int openedCount = 0;
+        foreach (string socketKey in appSockets)
+        {
+            if (state.CallSockets.ContainsKey(socketKey) || !socketFirstSeen.TryGetValue(socketKey, out DateTime firstSeen)) continue;
+            state.CallSockets[socketKey] = firstSeen;
+            openedCount++;
+        }
+
+        if (!state.SocketsSeeded)
+        {
+            state.SocketsSeeded = true;
+            AppHealth.LogEvent($"Call connections: {state.AppName} had {state.CallSockets.Count} UDP connections open when the call was detected.");
+        }
+        else if (openedCount > 0 || closedAges.Count > 0)
+        {
+            string closedText = closedAges.Count > 0 ? $"closed {closedAges.Count} (open {string.Join(", ", closedAges)})" : "closed 0";
+            AppHealth.LogEvent($"Call connections: {state.AppName} opened {openedCount}, {closedText}; {state.CallSockets.Count} open.");
+        }
+
+        if (state.CallSockets.Count > 0)
+        {
+            state.HadSockets = true;
+            state.SocketsGoneSince = null;
+        }
+        else if (state.HadSockets)
+        {
+            state.SocketsGoneSince ??= now;
+        }
+    }
+
     private Dictionary<string, Sighting> FindCalls(ProcessTable processes, out HashSet<string> callAppsPlayingAudio)
     {
         // Which apps hold a microphone, and on which devices they record and play.
