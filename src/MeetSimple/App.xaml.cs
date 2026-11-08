@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using MeetSimple.Core;
 using MeetSimple.Theming;
@@ -6,7 +7,12 @@ namespace MeetSimple;
 
 public partial class App : Application
 {
+    private static readonly TimeSpan ErrorDialogQuietPeriod = TimeSpan.FromSeconds(15);
+
     private static Mutex? singleInstanceLock;
+    private static bool errorDialogOpen;
+    private static DateTime lastErrorDialogUtc = DateTime.MinValue;
+    private static int suppressedErrorCount;
 
     /// <summary>True when the last run died while using the graphics card, so the main window can explain the switch.</summary>
     public static bool GraphicsCardTurnedOffAfterCrash { get; set; }
@@ -43,22 +49,68 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        singleInstanceLock?.Dispose();
+        ReleaseSingleInstanceLock();
         base.OnExit(e);
+    }
+
+    /// <summary>Starts a fresh copy and closes this one (used when a setting needs a new speech engine).</summary>
+    public static void Restart()
+    {
+        string? executablePath = Environment.ProcessPath;
+        if (executablePath == null) return;
+        // The new copy must not find this one's single-instance lock.
+        ReleaseSingleInstanceLock();
+        Process.Start(new ProcessStartInfo(executablePath) { UseShellExecute = false });
+        Current.Shutdown();
+    }
+
+    private static void ReleaseSingleInstanceLock()
+    {
+        if (singleInstanceLock == null) return;
+        try
+        {
+            singleInstanceLock.ReleaseMutex();
+        }
+        catch (ApplicationException)
+        {
+            // Not owned by this thread; disposing still closes the handle.
+        }
+        singleInstanceLock.Dispose();
+        singleInstanceLock = null;
     }
 
     public App()
     {
-        // Unexpected errors are written to a log users can attach to a bug report, and shown in a window instead of closing silently.
+        // Unexpected errors are always logged. A dialog is shown at most once per quiet period and never on top of
+        // another one, so an error that repeats (for example on every frame) cannot bury the window in dialogs.
         DispatcherUnhandledException += (_, args) =>
         {
             AppHealth.LogError(args.Exception, "Unexpected error (window thread)");
-            MessageBox.Show(
-                "Something unexpected went wrong.\n\n" + Redaction.Scrub(args.Exception.Message)
-                + "\n\nTechnical details were saved to:\n" + AppHealth.LogPath
-                + "\n\nIf this keeps happening, please attach that file when you report the problem.",
-                "Meet Simple - unexpected error", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
+            if (errorDialogOpen || DateTime.UtcNow - lastErrorDialogUtc < ErrorDialogQuietPeriod)
+            {
+                suppressedErrorCount++;
+                return;
+            }
+
+            string alsoLogged = suppressedErrorCount > 0
+                ? $"\n\n({suppressedErrorCount} more problem{(suppressedErrorCount == 1 ? " was" : "s were")} logged since the last message.)"
+                : "";
+            suppressedErrorCount = 0;
+            errorDialogOpen = true;
+            try
+            {
+                MessageBox.Show(
+                    "Something unexpected went wrong.\n\n" + Redaction.Scrub(args.Exception.Message)
+                    + "\n\nTechnical details were saved to:\n" + AppHealth.LogPath
+                    + "\n\nIf this keeps happening, please attach that file when you report the problem." + alsoLogged,
+                    "Meet Simple - unexpected error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                errorDialogOpen = false;
+                lastErrorDialogUtc = DateTime.UtcNow;
+            }
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             AppHealth.LogError(args.ExceptionObject as Exception, "Unexpected error (background thread)");

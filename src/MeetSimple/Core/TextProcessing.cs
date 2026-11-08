@@ -69,21 +69,38 @@ public static class TextProcessing
         return merged.OrderBy(segment => segment.Start).ToList();
     }
 
+    /// <summary>
+    /// An echo is the far side leaking from the speakers into the microphone: the same words at the same moment.
+    /// Long passages are matched loosely (60% shared words, 40% time overlap). Short replies such as "okay" or
+    /// "yes, thanks" are often said by both sides, so they only count as an echo when the words are identical and
+    /// they start within half a second of each other, which is how a speaker leak lines up and a real reply does not.
+    /// </summary>
     private static bool IsEcho(TranscriptSegment microphoneSegment, List<TranscriptSegment> otherSegments)
     {
+        const int ShortReplyWords = 3;
         double duration = Math.Max((microphoneSegment.End - microphoneSegment.Start).TotalSeconds, 0.1);
         var microphoneWords = WordSet(microphoneSegment.Text);
         if (microphoneWords.Count == 0) return false;
+        bool isShortReply = microphoneWords.Count < ShortReplyWords;
 
         foreach (var other in otherSegments)
         {
             double overlap = (Min(microphoneSegment.End, other.End) - Max(microphoneSegment.Start, other.Start)).TotalSeconds;
-            if (overlap < duration * 0.4) continue;
-
             var otherWords = WordSet(other.Text);
             int shared = microphoneWords.Count(word => otherWords.Contains(word));
             int union = microphoneWords.Count + otherWords.Count - shared;
-            if (union > 0 && (double)shared / union >= 0.6) return true;
+            if (union == 0) continue;
+            double similarity = (double)shared / union;
+
+            if (isShortReply)
+            {
+                double startGap = Math.Abs((microphoneSegment.Start - other.Start).TotalSeconds);
+                if (similarity >= 1.0 && startGap <= 0.5 && overlap >= duration * 0.8) return true;
+            }
+            else if (overlap >= duration * 0.4 && similarity >= 0.6)
+            {
+                return true;
+            }
         }
         return false;
     }
@@ -114,12 +131,38 @@ public static class TextProcessing
         return builder.ToString();
     }
 
-    /// <summary>Groups cleaned transcript lines into chunks of roughly maxWords words for the summarizer.</summary>
-    public static List<(string TimeRange, string Text)> BuildChunks(IReadOnlyList<TranscriptSegment> segments, int maxWords = 1500)
+    /// <summary>The filler and stutter rules are English ("um", "er", "uh"); in German "er" means "he" and in Portuguese "um" means "a".</summary>
+    public static bool IsEnglish(TranscriptSegment segment) => segment.Language is "en" or "english";
+
+    /// <summary>
+    /// A language-neutral estimate of how many AI tokens a text uses. Counting spaces fails for Chinese, Japanese and
+    /// Korean (no spaces, about one token per character); for other scripts about four characters make a token.
+    /// It errs on the high side, which keeps every chunk inside the summary AI's context window.
+    /// </summary>
+    public static int EstimateTokens(string text)
+    {
+        int wideCharacters = 0;
+        int otherCharacters = 0;
+        foreach (char character in text)
+        {
+            if (char.IsWhiteSpace(character)) continue;
+            if (IsWideScript(character)) wideCharacters++; else otherCharacters++;
+        }
+        return wideCharacters + (otherCharacters + 3) / 4;
+    }
+
+    private static bool IsWideScript(char character) =>
+        character is >= '\u3040' and <= '\u30FF'   // Hiragana, Katakana
+            or >= '\u3400' and <= '\u9FFF'         // CJK ideographs
+            or >= '\uAC00' and <= '\uD7AF'         // Hangul syllables
+            or >= '\uF900' and <= '\uFAFF';        // CJK compatibility ideographs
+
+    /// <summary>Groups transcript lines into chunks of roughly maxTokens estimated tokens for the summarizer.</summary>
+    public static List<(string TimeRange, string Text)> BuildChunks(IReadOnlyList<TranscriptSegment> segments, int maxTokens = 2000)
     {
         var chunks = new List<(string, string)>();
         var lines = new List<string>();
-        int wordCount = 0;
+        int tokenCount = 0;
         TimeSpan chunkStart = TimeSpan.Zero;
         TimeSpan chunkEnd = TimeSpan.Zero;
 
@@ -130,19 +173,19 @@ public static class TextProcessing
                 chunks.Add(($"{FormatTimestamp(chunkStart)} - {FormatTimestamp(chunkEnd)}", string.Join("\n", lines)));
             }
             lines.Clear();
-            wordCount = 0;
+            tokenCount = 0;
         }
 
         foreach (var segment in segments)
         {
-            string cleaned = CleanFiller(segment.Text);
+            string cleaned = IsEnglish(segment) ? CleanFiller(segment.Text) : segment.Text.Trim();
             if (cleaned.Length == 0) continue;
             if (lines.Count == 0) chunkStart = segment.Start;
 
             lines.Add(segment.Speaker != null ? $"{segment.Speaker}: {cleaned}" : cleaned);
-            wordCount += cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+            tokenCount += EstimateTokens(cleaned);
             chunkEnd = segment.End;
-            if (wordCount >= maxWords) Flush();
+            if (tokenCount >= maxTokens) Flush();
         }
         Flush();
         return chunks;

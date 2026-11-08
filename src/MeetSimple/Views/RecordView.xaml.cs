@@ -84,6 +84,8 @@ public partial class RecordView : UserControl, IDisposable
         try
         {
             recorder.StartRecording(sessionFolder);
+            // Until a transcript exists, the next start can offer this recording again (see RecordingRecovery).
+            RecordingRecovery.MarkUnfinished(sessionFolder, mode);
         }
         catch (Exception error)
         {
@@ -109,19 +111,33 @@ public partial class RecordView : UserControl, IDisposable
 
         if (recording.Duration < TimeSpan.FromSeconds(3))
         {
+            DiscardSessionFolder();
             ResetToIdle("That recording was too short. Try again when you're ready.", isWarning: true);
             return;
         }
 
         var tracks = new List<AudioTrack>();
-        if (recording.MicrophonePath != null) tracks.Add(new AudioTrack("You", recording.MicrophonePath));
-        if (recording.ComputerAudioPath != null) tracks.Add(new AudioTrack("Others", recording.ComputerAudioPath));
+        if (recording.MicrophonePaths is { Count: > 0 } microphonePaths) tracks.Add(new AudioTrack("You", microphonePaths));
+        if (recording.ComputerAudioPaths is { Count: > 0 } computerPaths) tracks.Add(new AudioTrack("Others", computerPaths));
 
-        var request = shell.CreateRequest(mode, tracks, sessionFolder, "Meeting");
+        var request = shell.CreateRequest(mode, tracks, sessionFolder, "Meeting", recoveryFolder: sessionFolder);
         bool started = await shell.StartJobAsync(request);
         if (!started)
         {
-            ResetToIdle($"Your recording is saved in: {sessionFolder}");
+            ResetToIdle($"Your recording is saved in: {sessionFolder}. Meet Simple will offer to transcribe it next time it opens.");
+        }
+    }
+
+    /// <summary>A recording of a second or two is never useful, so it does not leave an empty-looking folder behind.</summary>
+    private void DiscardSessionFolder()
+    {
+        try
+        {
+            if (Directory.Exists(sessionFolder)) Directory.Delete(sessionFolder, recursive: true);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            RecordingRecovery.Clear(sessionFolder);
         }
     }
 

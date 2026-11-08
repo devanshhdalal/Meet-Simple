@@ -42,7 +42,7 @@ public sealed class AppSettings
         if (!InputValidation.IsKnownSpeechModel(SpeechModel)) SpeechModel = Catalog.DefaultSpeechModel;
         Glossary = InputValidation.CleanGlossary(Glossary);
         if (!InputValidation.IsValidModelName(SummaryModel)) SummaryModel = "llama3.1:8b";
-        if (!InputValidation.IsValidLanguage(Language)) Language = "";
+        Language = Catalog.NormalizeLanguage(Language);
         if (Theme != "light" && Theme != "dark") Theme = "system";
         if (!Theming.SpaceManager.IsKnown(Space)) Space = Theming.SpaceManager.DefaultId;
     }

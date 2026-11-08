@@ -25,7 +25,7 @@ public static class AuthenticodeVerifier
         try
         {
             using var certificate = new X509Certificate2(X509Certificate.CreateFromSignedFile(filePath));
-            if (!SubjectHasOrganization(certificate.Subject, expectedOrganization))
+            if (!SubjectHasOrganization(certificate.SubjectName, expectedOrganization))
             {
                 reason = $"it is signed by someone else ({certificate.GetNameInfo(X509NameType.SimpleName, false)})";
                 return false;
@@ -39,14 +39,21 @@ public static class AuthenticodeVerifier
         }
     }
 
-    private static bool SubjectHasOrganization(string subject, string organization)
+    private const string OrganizationOid = "2.5.4.10";
+    private const string CommonNameOid = "2.5.4.3";
+
+    /// <summary>
+    /// Reads the certificate's decoded name parts instead of splitting the subject text on commas: a subject like
+    /// O="Evil, O=Ollama Inc." is one organisation called "Evil, O=Ollama Inc.", and text splitting would be fooled by it.
+    /// </summary>
+    private static bool SubjectHasOrganization(X500DistinguishedName subject, string organization)
     {
-        foreach (var part in subject.Split(','))
+        foreach (var namepart in subject.EnumerateRelativeDistinguishedNames())
         {
-            var pieces = part.Trim().Split('=', 2);
-            if (pieces.Length == 2
-                && (pieces[0].Equals("O", StringComparison.OrdinalIgnoreCase) || pieces[0].Equals("CN", StringComparison.OrdinalIgnoreCase))
-                && pieces[1].Trim().Trim('"').Equals(organization, StringComparison.OrdinalIgnoreCase))
+            if (namepart.HasMultipleElements) continue;
+            string? oid = namepart.GetSingleElementType().Value;
+            if (oid != OrganizationOid && oid != CommonNameOid) continue;
+            if (string.Equals(namepart.GetSingleElementValue()?.Trim(), organization, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

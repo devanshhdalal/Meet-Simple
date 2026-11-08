@@ -11,42 +11,47 @@ public static class AudioPreparer
 {
     private const int WhisperSampleRate = 16000;
 
+    /// <summary>All source files are decoded one after the other into one continuous WAV (long recordings come in parts).</summary>
     public static Task<PreparedAudio> PrepareAsync(
-        string sourcePath, string wavOutputPath, IProgress<double>? progress, CancellationToken cancellationToken)
+        IReadOnlyList<string> sourcePaths, string wavOutputPath, IProgress<double>? progress, CancellationToken cancellationToken)
     {
-        return Task.Run(() => Prepare(sourcePath, wavOutputPath, progress, cancellationToken), cancellationToken);
+        return Task.Run(() => Prepare(sourcePaths, wavOutputPath, progress, cancellationToken), cancellationToken);
     }
 
     private static PreparedAudio Prepare(
-        string sourcePath, string wavOutputPath, IProgress<double>? progress, CancellationToken cancellationToken)
+        IReadOnlyList<string> sourcePaths, string wavOutputPath, IProgress<double>? progress, CancellationToken cancellationToken)
     {
-        using var reader = OpenReader(sourcePath);
-        ISampleProvider monoProvider = new MonoDownmixSampleProvider(reader);
-        ISampleProvider whisperProvider = reader.WaveFormat.SampleRate == WhisperSampleRate
-            ? monoProvider
-            : new WdlResamplingSampleProvider(monoProvider, WhisperSampleRate);
-
         using var writer = new WaveFileWriter(wavOutputPath, new WaveFormat(WhisperSampleRate, 16, 1));
         var floatBuffer = new float[WhisperSampleRate * 4];
         var shortBuffer = new short[floatBuffer.Length];
         float peak = 0f;
         long totalSamples = 0;
-        double totalSeconds = Math.Max(reader.TotalTime.TotalSeconds, 1.0);
 
-        int samplesRead;
-        while ((samplesRead = whisperProvider.Read(floatBuffer, 0, floatBuffer.Length)) > 0)
+        for (int partIndex = 0; partIndex < sourcePaths.Count; partIndex++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            for (int index = 0; index < samplesRead; index++)
+            using var reader = OpenReader(sourcePaths[partIndex]);
+            ISampleProvider monoProvider = new MonoDownmixSampleProvider(reader);
+            ISampleProvider whisperProvider = reader.WaveFormat.SampleRate == WhisperSampleRate
+                ? monoProvider
+                : new WdlResamplingSampleProvider(monoProvider, WhisperSampleRate);
+            double partSeconds = Math.Max(reader.TotalTime.TotalSeconds, 1.0);
+
+            int samplesRead;
+            while ((samplesRead = whisperProvider.Read(floatBuffer, 0, floatBuffer.Length)) > 0)
             {
-                float sample = floatBuffer[index];
-                float magnitude = Math.Abs(sample);
-                if (magnitude > peak) peak = magnitude;
-                shortBuffer[index] = (short)Math.Clamp(sample * 32767f, -32768f, 32767f);
+                cancellationToken.ThrowIfCancellationRequested();
+                for (int index = 0; index < samplesRead; index++)
+                {
+                    float sample = floatBuffer[index];
+                    float magnitude = Math.Abs(sample);
+                    if (magnitude > peak) peak = magnitude;
+                    shortBuffer[index] = (short)Math.Clamp(sample * 32767f, -32768f, 32767f);
+                }
+                writer.WriteSamples(shortBuffer, 0, samplesRead);
+                totalSamples += samplesRead;
+                double partFraction = Math.Min(reader.CurrentTime.TotalSeconds / partSeconds, 1.0);
+                progress?.Report((partIndex + partFraction) / sourcePaths.Count);
             }
-            writer.WriteSamples(shortBuffer, 0, samplesRead);
-            totalSamples += samplesRead;
-            progress?.Report(Math.Min(reader.CurrentTime.TotalSeconds / totalSeconds, 1.0));
         }
 
         if (totalSamples == 0)

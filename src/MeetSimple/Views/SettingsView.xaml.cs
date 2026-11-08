@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using MeetSimple.Core;
@@ -30,7 +29,8 @@ public partial class SettingsView : UserControl
         string summaryLabel = Catalog.LabelFor(Catalog.SummaryModels, settings.SummaryModel);
         if (!SummaryModelBox.Items.Contains(summaryLabel)) SummaryModelBox.Items.Add(summaryLabel);
         SummaryModelBox.SelectedItem = summaryLabel;
-        LanguageBox.Text = settings.Language;
+        foreach (var language in Catalog.Languages) LanguageBox.Items.Add(language.Label);
+        LanguageBox.SelectedIndex = Math.Max(0, Array.FindIndex(Catalog.Languages, language => language.Id == settings.Language));
 
         foreach (var option in ThemeOptions) ThemeBox.Items.Add(option.Label);
         SyncThemeBox();
@@ -87,14 +87,7 @@ public partial class SettingsView : UserControl
 
     private void OnSaveClick(object sender, RoutedEventArgs e)
     {
-        string languageCode = LanguageBox.Text.Trim();
-        if (!InputValidation.IsValidLanguage(languageCode))
-        {
-            AppDialog.Notice(Window.GetWindow(this), "Language",
-                "Please enter a language code such as en, es or pt-BR, or leave it empty to detect it automatically.");
-            return;
-        }
-
+        string languageCode = LanguageBox.SelectedIndex > 0 ? Catalog.Languages[LanguageBox.SelectedIndex].Id : "";
         var settings = AppSettings.Current;
         settings.SpeechModel = Catalog.IdFor(Catalog.SpeechModels, SpeechModelBox.SelectedItem as string ?? "", Catalog.DefaultSpeechModel);
         settings.BestAccuracy = (AccuracyBox.SelectedItem as string) != FasterLabel;
@@ -103,12 +96,25 @@ public partial class SettingsView : UserControl
         settings.SummaryModel = Catalog.IdFor(Catalog.SummaryModels, SummaryModelBox.SelectedItem as string ?? "", "llama3.1:8b");
         settings.Language = languageCode;
         settings.Save();
+
+        // The speech engine is chosen once per run, so compare with what is actually loaded, not with the old setting.
+        if (settings.UseGraphicsCard != TranscriptionService.GraphicsCardEnabledForThisRun)
+        {
+            var owner = Window.GetWindow(this);
+            if (shell.IsJobRunning)
+            {
+                AppDialog.Notice(owner, "Restart needed",
+                    "The graphics card setting is saved and takes effect the next time you open Meet Simple.");
+            }
+            else if (AppDialog.Confirm(owner, "Restart Meet Simple?",
+                         "The graphics card setting takes effect after a restart. It only takes a moment. Restart now?"))
+            {
+                App.Restart();
+                return;
+            }
+        }
         shell.ShowHome();
     }
 
-    private void OnOpenFolderClick(object sender, RoutedEventArgs e)
-    {
-        Directory.CreateDirectory(AppSettings.RecordingsRoot);
-        Process.Start(new ProcessStartInfo(AppSettings.RecordingsRoot) { UseShellExecute = true });
-    }
+    private void OnOpenFolderClick(object sender, RoutedEventArgs e) => MainWindow.OpenRecordingsFolder();
 }

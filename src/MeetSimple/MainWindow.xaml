@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:views="clr-namespace:MeetSimple.Views"
         Title="Meet Simple" Width="1120" Height="740" MinWidth="1000" MinHeight="680"
         WindowStartupLocation="CenterScreen" UseLayoutRounding="True"
         Background="{DynamicResource SpaceBackdropBrush}"
@@ -139,6 +140,8 @@
                     <ContentControl x:Name="Host" />
                     <!-- Picture of the previous screen that fades away, so a change is never abrupt -->
                     <Image x:Name="PageSnapshot" Stretch="Fill" IsHitTestVisible="False" Visibility="Collapsed" />
+                    <!-- The running job as a pill at the bottom while other screens are open (Views/ActivityIsland) -->
+                    <views:ActivityIsland x:Name="Island" />
                 </Grid>
             </Border>
         </Grid>

@@ -23,9 +23,12 @@ public partial class ResultView : UserControl
         string folder = Path.GetDirectoryName(result.TranscriptPath) ?? "";
         SubtitleText.Text = $"Finished in {FormatDuration(result.Elapsed)}"
             + (string.IsNullOrEmpty(folder) ? "." : $" · Saved in {folder}");
-        if (!string.IsNullOrEmpty(result.SummaryError))
+        var warnings = new List<string>();
+        if (!string.IsNullOrEmpty(result.Notice)) warnings.Add(result.Notice);
+        if (!string.IsNullOrEmpty(result.SummaryError)) warnings.Add("The summary was skipped: " + result.SummaryError);
+        if (warnings.Count > 0)
         {
-            WarningText.Text = "The summary was skipped: " + result.SummaryError;
+            WarningText.Text = string.Join("\n", warnings);
             WarningText.Visibility = Visibility.Visible;
         }
 
@@ -45,7 +48,15 @@ public partial class ResultView : UserControl
 
     private string BuildTranscriptPreview()
     {
-        string text = File.ReadAllText(result.TranscriptPath);
+        string text;
+        try
+        {
+            text = File.ReadAllText(result.TranscriptPath);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return "(The transcript was saved but cannot be previewed: " + error.Message + ")";
+        }
         if (text.Length == 0) return "(No speech was detected.)";
         return text.Length > PreviewCharacterLimit
             ? text[..PreviewCharacterLimit] + "\n\n... (open the transcript to read everything)"
@@ -58,16 +69,25 @@ public partial class ResultView : UserControl
         {
             AddButton("Open summary", "AccentButton", () => OpenFile(result.SummaryPath));
             AddButton("Open transcript", "QuietButton", () => OpenFile(result.TranscriptPath));
-            AddButton("Copy summary", "QuietButton", () => Clipboard.SetText(result.SummaryText));
+            AddButton("Copy summary", "QuietButton", () => RunView.CopyToClipboard(result.SummaryText));
         }
         else
         {
             AddButton("Open transcript", "AccentButton", () => OpenFile(result.TranscriptPath));
         }
         AddButton("Show in folder", "QuietButton", () =>
-            Process.Start(new ProcessStartInfo(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
-                $"/select,\"{result.TranscriptPath}\"")));
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                    $"/select,\"{result.TranscriptPath}\""));
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Explorer missing or blocked by policy; the path is shown above.
+            }
+        });
         AddButton("Start another", "QuietButton", shell.ShowHome);
     }
 
@@ -83,8 +103,7 @@ public partial class ResultView : UserControl
         ButtonPanel.Children.Add(button);
     }
 
-    private static void OpenFile(string path) =>
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    private static void OpenFile(string path) => RunView.OpenFile(path);
 
     private static string FormatDuration(TimeSpan duration) =>
         duration.TotalHours >= 1

@@ -1,4 +1,4 @@
-﻿# Makes the publish folder easy to scan: keep MeetSimple.exe obvious, drop unused RID
+# Makes the publish folder easy to scan: keep MeetSimple.exe obvious, drop unused RID
 # folders and debugger leftovers, and leave a short note for end users.
 param(
     [Parameter(Mandatory = $true)]
@@ -27,6 +27,7 @@ if (Test-Path -LiteralPath $runtimes) {
 $keepTop = @(
     "MeetSimple.exe",
     "runtimes",
+    "Licenses",
     "D3DCompiler_47_cor3.dll",
     "PenImc_cor3.dll",
     "PresentationNative_cor3.dll",

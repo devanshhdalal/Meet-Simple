@@ -15,6 +15,9 @@ public static class Motion
 
     private static readonly CubicBezierEase Curve = CreateCurve();
 
+    /// <summary>The shared ease-in-out curve, for code that builds its own animations.</summary>
+    public static IEasingFunction StandardCurve => Curve;
+
     /// <summary>False when the user turned off animations in Windows, in which case everything changes instantly.</summary>
     public static bool Enabled => SystemParameters.ClientAreaAnimation;
 
