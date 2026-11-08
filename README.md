@@ -19,7 +19,7 @@ Nothing is uploaded. Speech recognition runs locally with [Whisper](https://gith
 | **Private by design** | Audio, transcripts, and summaries stay on disk. No accounts, no cloud API for speech or summary. |
 | **Built for meetings** | Captures mic (“You”) and computer audio (“Others”) as separate tracks, then merges them into one readable transcript. |
 | **Honest downloads** | Large models are fetched only after you agree. Checksums and signature checks apply where we can. |
-| **Windows-native** | Arc-inspired shell, colour “spaces”, light/dark that can follow Windows, self-contained zip (no .NET install for end users). |
+| **Windows-native** | colour “spaces”, light/dark that can follow Windows, self-contained zip (no .NET install for end users). |
 
 ---
 
