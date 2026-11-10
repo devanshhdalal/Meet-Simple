@@ -4,7 +4,7 @@
 ; 3) Open this file and press Compile.
 [Setup]
 AppName=Meet Simple
-AppVersion=1.0.0
+AppVersion=0.1.3
 DefaultDirName={localappdata}\Programs\Meet Simple
 DefaultGroupName=Meet Simple
 PrivilegesRequired=lowest

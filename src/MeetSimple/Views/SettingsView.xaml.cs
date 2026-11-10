@@ -31,6 +31,10 @@ public partial class SettingsView : UserControl
         StartupBox.Items.Add(OffLabel);
         StartupBox.Items.Add(StartInTrayLabel);
         StartupBox.SelectedItem = settings.StartWithWindows ? StartInTrayLabel : OffLabel;
+        UpdatesBox.Items.Add(CheckUpdatesOnLabel);
+        UpdatesBox.Items.Add(OffLabel);
+        UpdatesBox.SelectedItem = settings.CheckForUpdates ? CheckUpdatesOnLabel : OffLabel;
+        BuildVersionText.Text = $"This build: {UpdateChecker.LocalVersionLabel}";
 
         string summaryLabel = Catalog.LabelFor(Catalog.SummaryModels, settings.SummaryModel);
         if (!SummaryModelBox.Items.Contains(summaryLabel)) SummaryModelBox.Items.Add(summaryLabel);
@@ -60,6 +64,7 @@ public partial class SettingsView : UserControl
     private const string ProcessorOnlyLabel = "Processor only (slower, most compatible)";
     private const string WatchCallsLabel = "Ask to record when a call starts";
     private const string StartInTrayLabel = "Start in the tray when I sign in";
+    private const string CheckUpdatesOnLabel = "Check for updates";
     private const string OffLabel = "Off";
 
     private static readonly (ThemeChoice Choice, string Label)[] ThemeOptions =
@@ -106,6 +111,7 @@ public partial class SettingsView : UserControl
         settings.Language = languageCode;
         settings.WatchForCalls = (CallWatchBox.SelectedItem as string) == WatchCallsLabel;
         settings.StartWithWindows = (StartupBox.SelectedItem as string) == StartInTrayLabel;
+        settings.CheckForUpdates = (UpdatesBox.SelectedItem as string) == CheckUpdatesOnLabel;
         settings.Save();
         App.Calls?.ApplySettings();
 

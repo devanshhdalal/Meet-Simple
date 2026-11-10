@@ -68,6 +68,13 @@
                                FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" />
                     <ComboBox x:Name="LanguageBox" HorizontalAlignment="Left" MinWidth="220" MaxDropDownHeight="320" />
 
+                    <TextBlock Text="Updates" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="When a newer release is on GitHub, ask Update or Later. Update downloads and installs it for you."
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,2,0,6" TextWrapping="Wrap" />
+                    <ComboBox x:Name="UpdatesBox" HorizontalAlignment="Left" />
+                    <TextBlock x:Name="BuildVersionText" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                               Margin="0,8,0,0" />
+
                     <Button Content="Open my recordings folder" Style="{StaticResource QuietButton}"
                             HorizontalAlignment="Left" Margin="0,26,0,0" Click="OnOpenFolderClick" />
                 </StackPanel>

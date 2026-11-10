@@ -1,0 +1,33 @@
+<Window x:Class="MeetSimple.Views.UpdateProgressWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Updating Meet Simple" SizeToContent="WidthAndHeight" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        FontFamily="{StaticResource AppFont}" FontSize="14"
+        TextElement.Foreground="{DynamicResource TextBrush}"
+        MinWidth="420" MaxWidth="520">
+
+    <Border Margin="12" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource LineBrush}"
+            BorderThickness="1" CornerRadius="12" Padding="28,24,28,22">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24" ShadowDepth="3" Direction="270" Color="Black" Opacity="0.22" />
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="Updating Meet Simple" Style="{StaticResource DisplayTitle}" FontSize="18"
+                       FontWeight="SemiBold" />
+            <TextBlock Grid.Row="1" x:Name="StatusText" Text="Downloading update…" TextWrapping="Wrap"
+                       Margin="0,10,0,0" Foreground="{DynamicResource MutedBrush}" LineHeight="22" />
+            <ProgressBar Grid.Row="2" x:Name="Bar" Height="6" Margin="0,18,0,0" Maximum="100" />
+            <Button Grid.Row="3" x:Name="CancelButton" Content="Cancel" Style="{StaticResource QuietButton}"
+                    HorizontalAlignment="Right" Margin="0,22,0,0" IsCancel="True" Click="OnCancelClick" />
+        </Grid>
+    </Border>
+</Window>

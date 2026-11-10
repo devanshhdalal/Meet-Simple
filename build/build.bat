@@ -88,12 +88,24 @@ powershell -NoProfile -Command ^
 
 echo.
 echo SHA-256 of the zip (publish this next to the download so people can verify it):
-certutil -hashfile MeetSimple-win-x64.zip SHA256
+rem One-line hex file for in-app update verification (upload next to the zip on the GitHub release).
+rem Prefer certutil — some shells lack Get-FileHash.
+set "ZIP_SHA256="
+for /f "skip=1 delims=" %%H in ('certutil -hashfile MeetSimple-win-x64.zip SHA256') do (
+  if not defined ZIP_SHA256 set "ZIP_SHA256=%%H"
+)
+if not defined ZIP_SHA256 goto :fail
+rem certutil prints the hex with spaces on some locales; strip them.
+set "ZIP_SHA256=%ZIP_SHA256: =%"
+echo SHA256 hash of MeetSimple-win-x64.zip:
+echo %ZIP_SHA256%
+>MeetSimple-win-x64.zip.sha256 <nul set /p =%ZIP_SHA256%
 
 echo.
 echo Done.
 echo   Try it:   publish\MeetSimple.exe
-echo   Share it: MeetSimple-win-x64.zip  (unzip, open the MeetSimple folder, run MeetSimple.exe)
+echo   Share it: MeetSimple-win-x64.zip  (and MeetSimple-win-x64.zip.sha256 with the release)
+echo   Reminder: set Version in MeetSimple.csproj to match the GitHub tag before building.
 if /i "%MEETSIMPLE_BUILD_NOPAUSE%"=="1" exit /b 0
 pause
 exit /b 0
