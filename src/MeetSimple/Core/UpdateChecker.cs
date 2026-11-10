@@ -32,8 +32,7 @@ public static class UpdateChecker
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private static readonly Regex Sha256Line = new(@"\b([a-fA-F0-9]{64})\b", RegexOptions.CultureInvariant);
 
-    private static readonly HttpClient Http = CreateClient();
-
+    // Must be initialized before Http — CreateClient reads LocalVersionLabel for the User-Agent.
     public static Version LocalVersion { get; } =
         Assembly.GetExecutingAssembly().GetName().Version is { } version
             ? new Version(version.Major, version.Minor, Math.Max(version.Build, 0))
@@ -41,6 +40,8 @@ public static class UpdateChecker
 
     public static string LocalVersionLabel =>
         $"{LocalVersion.Major}.{LocalVersion.Minor}.{LocalVersion.Build}";
+
+    private static readonly HttpClient Http = CreateClient();
 
     public static async Task<AppUpdateInfo?> CheckForNewerAsync(CancellationToken cancellationToken = default)
     {
