@@ -214,8 +214,8 @@ Architecture notes for contributors live in [`AGENTS.md`](AGENTS.md).
 ## Privacy and security
 
 - No telemetry. Processing is local.  
-- Network use is limited to **user-approved** setup: speech models (Hugging Face), the Ollama installer (ollama.com → GitHub), and summary model pulls through **localhost** Ollama.  
-- Downloads are HTTPS-only, host-allowlisted, size-capped, and checksum-verified; the Ollama installer must pass an Authenticode check for “Ollama Inc.” before it runs.  
+- Network use is limited to **user-approved** setup: speech models (Hugging Face), the Ollama installer (ollama.com → GitHub), summary model pulls through **localhost** Ollama, and — when Check for updates is on — GitHub release metadata plus a verified zip apply after you click Update.  
+- Downloads are HTTPS-only, host-allowlisted, size-capped, and checksum-verified; the Ollama installer must pass an Authenticode check for “Ollama Inc.” before it runs; app updates fail closed without a matching SHA-256.  
 - Supply chain: locked `packages.lock.json`, CI `--locked-mode`, CodeQL, and Dependabot. See [`SECURITY.md`](SECURITY.md) to report issues.
 
 ---
@@ -253,17 +253,22 @@ Speech and summary **models are not shipped** in this repository; they are downl
 
 ## Status
 
-Early open-source release ([v0.1.1](https://github.com/devanshhdalal/Meet-Simple/releases/tag/v0.1.1)). Bug reports and timed hardware notes are welcome.
+Early open-source release ([v0.1.3](https://github.com/devanshhdalal/Meet-Simple/releases/tag/v0.1.3)). Bug reports and timed hardware notes are welcome.
 
 **Verified**
 - App launches on Windows 11 x64; self-contained zip layout (`MeetSimple.exe` + `runtimes\`)
 - Transcribe-only path does not require Ollama
 - Speech models cache under AppData and are reused across app updates
+- Call detection prompts when a meeting app holds the mic; never records without a click; tray + optional Start with Windows
+- Background jobs keep running behind Home/Settings via the activity island
+- UI uses embedded Inter (Inter Display for titles); light/dark and colour spaces swap live
+- Optional in-app update check (Settings) compares this build to GitHub releases and applies only after SHA-256 verification
 
 **Known limitations**
 - Live recording edge cases (headset unplug, default-device switch) still being hardened
 - Vulkan / GPU path not exhaustively tested across hardware
 - Ollama silent install + Authenticode checks need more real-machine confirmation
+- In-app Update → apply needs a published `MeetSimple-win-x64.zip` + `.sha256` on the GitHub release to be exercised end-to-end
 - Default Whisper CPU runtime expects **AVX2** (NoAvx runtime not shipped yet)
 - Windows 10 support intended but less exercised than Windows 11
 - No published reference timings yet for “N-minute meeting → X minutes” on CPU vs GPU

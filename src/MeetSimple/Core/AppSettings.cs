@@ -42,6 +42,18 @@ public sealed class AppSettings
     /// <summary>The colour space (see SpaceManager): violet, ocean, forest, sunset or graphite.</summary>
     public string Space { get; set; } = Theming.SpaceManager.DefaultId;
 
+    /// <summary>When on (the default), ask if GitHub has a newer Meet Simple release.</summary>
+    public bool CheckForUpdates { get; set; } = true;
+
+    /// <summary>Last successful contact with the GitHub releases API (UTC).</summary>
+    public DateTime? LastUpdateCheckUtc { get; set; }
+
+    /// <summary>Release tag we last snoozed (with or without a leading v).</summary>
+    public string SnoozedUpdateVersion { get; set; } = "";
+
+    /// <summary>Do not ask again about <see cref="SnoozedUpdateVersion"/> until this UTC time.</summary>
+    public DateTime? SnoozeUntilUtc { get; set; }
+
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeetSimple", "settings.json");
 

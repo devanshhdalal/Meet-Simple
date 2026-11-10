@@ -16,18 +16,23 @@ public partial class AppDialog : Window
 
     public static void Notice(Window? owner, string title, string message)
     {
-        var dialog = Create(owner, title, message, confirm: false);
+        var dialog = Create(owner, title, message, confirm: false, primaryLabel: "OK", secondaryLabel: "Cancel");
         dialog.ShowDialog();
     }
 
-    public static bool Confirm(Window? owner, string title, string message)
+    public static bool Confirm(Window? owner, string title, string message) =>
+        Confirm(owner, title, message, "Continue", "Cancel");
+
+    public static bool Confirm(
+        Window? owner, string title, string message, string primaryLabel, string secondaryLabel)
     {
-        var dialog = Create(owner, title, message, confirm: true);
+        var dialog = Create(owner, title, message, confirm: true, primaryLabel, secondaryLabel);
         dialog.ShowDialog();
         return dialog.confirmed;
     }
 
-    private static AppDialog Create(Window? owner, string title, string message, bool confirm)
+    private static AppDialog Create(
+        Window? owner, string title, string message, bool confirm, string primaryLabel, string secondaryLabel)
     {
         var dialog = new AppDialog
         {
@@ -36,16 +41,15 @@ public partial class AppDialog : Window
         };
         dialog.TitleText.Text = title;
         dialog.BodyText.Text = message;
+        dialog.PrimaryButton.Content = primaryLabel;
         if (confirm)
         {
-            dialog.PrimaryButton.Content = "Continue";
-            dialog.SecondaryButton.Content = "Cancel";
+            dialog.SecondaryButton.Content = secondaryLabel;
             dialog.SecondaryButton.Visibility = Visibility.Visible;
             dialog.SecondaryButton.IsCancel = true;
         }
         else
         {
-            dialog.PrimaryButton.Content = "OK";
             dialog.SecondaryButton.Visibility = Visibility.Collapsed;
             dialog.PrimaryButton.IsCancel = true;
         }

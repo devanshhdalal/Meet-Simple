@@ -1,6 +1,6 @@
 # Security policy
 
-Meet Simple is designed so **audio, transcripts, and summaries never leave the machine**, aside from optional one-time setup downloads the user explicitly approves.
+Meet Simple is designed so **audio, transcripts, and summaries never leave the machine**, aside from optional one-time setup downloads the user explicitly approves, and an optional GitHub release check / update apply when “Check for updates” is on.
 
 ## Supported versions
 
@@ -9,7 +9,8 @@ Security fixes target the latest source on `main` and the newest published relea
 ## What is in scope
 
 - Unexpected network egress or data leaving the device  
-- Bypass of download host allowlists, checksum verification, or Ollama Authenticode checks  
+- Bypass of download host allowlists, checksum verification, Ollama Authenticode checks, or app-update SHA-256 / zip-slip checks  
+
 - Path traversal or unsafe handling of settings / model ids / output names  
 - Supply-chain issues in dependencies we ship or restore  
 

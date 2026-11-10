@@ -76,6 +76,7 @@ public partial class MainWindow : Window
         }
 
         await OfferUnfinishedRecordingAsync();
+        await MaybeOfferUpdateAsync();
     }
 
     /// <summary>A recording that was never transcribed (saved for later, window closed, crash) is offered once per start.</summary>
@@ -85,6 +86,129 @@ public partial class MainWindow : Window
         var unfinished = await Task.Run(() => RecordingRecovery.FindLatest(folderBeingRecorded));
         if (unfinished == null || activeJob != null) return;
         await OfferRecordingAsync(unfinished);
+    }
+
+    private static bool updateCheckInFlight;
+
+    /// <summary>Quiet GitHub release check. Update downloads and applies; Later snoozes for a week.</summary>
+    private async Task MaybeOfferUpdateAsync()
+    {
+        if (updateCheckInFlight) return;
+        var settings = AppSettings.Current;
+        if (!settings.CheckForUpdates) return;
+        if (IsBusyForUpdatePrompt()) return;
+
+        DateTime now = DateTime.UtcNow;
+        if (settings.LastUpdateCheckUtc is DateTime last && now - last < TimeSpan.FromHours(24)) return;
+
+        updateCheckInFlight = true;
+        try
+        {
+            var update = await UpdateChecker.CheckForNewerAsync();
+            settings.LastUpdateCheckUtc = DateTime.UtcNow;
+            settings.Save();
+            if (update == null) return;
+            if (IsBusyForUpdatePrompt()) return;
+
+            string tagKey = NormalizeUpdateTag(update.Tag);
+            if (IsSnoozed(settings, tagKey, now)) return;
+
+            bool updateNow = AppDialog.Confirm(
+                this,
+                "Update available",
+                $"Meet Simple {FormatUpdateLabel(update.Tag)} is out (you have {UpdateChecker.LocalVersionLabel}).\n\n"
+                + "Update downloads it, checks it, and installs it. Meet Simple will restart when it is done.",
+                "Update",
+                "Later");
+
+            if (!updateNow)
+            {
+                Snooze(settings, tagKey, days: 7);
+                return;
+            }
+
+            await ApplyUpdateAsync(update);
+        }
+        catch (Exception)
+        {
+            // Update checks must never take down the window thread.
+        }
+        finally
+        {
+            updateCheckInFlight = false;
+        }
+    }
+
+    private bool IsBusyForUpdatePrompt() =>
+        IsRecording || App.Calls?.IsRecording == true || IsJobRunning;
+
+    private async Task ApplyUpdateAsync(AppUpdateInfo update)
+    {
+        string tagKey = NormalizeUpdateTag(update.Tag);
+        if (!AppUpdater.CanWriteInstallDirectory())
+        {
+            AppDialog.Notice(this, "Update available",
+                "Meet Simple cannot write to its install folder, so the download page will open instead. "
+                + "Quit the app before replacing the folder.");
+            AppUpdater.OpenReleasePage(update);
+            Snooze(AppSettings.Current, tagKey, days: 1);
+            return;
+        }
+
+        var progressWindow = new UpdateProgressWindow { Owner = this };
+        var progress = new Progress<ProgressInfo>(progressWindow.Report);
+        progressWindow.Show();
+        try
+        {
+            await AppUpdater.PrepareAsync(update, progress, progressWindow.Token);
+            progressWindow.MarkFinished();
+            progressWindow.Close();
+            AppUpdater.StartApplyAndExit();
+            AllowExit();
+            Application.Current.Shutdown();
+        }
+        catch (OperationCanceledException)
+        {
+            if (progressWindow.IsVisible) progressWindow.Close();
+        }
+        catch (Exception error)
+        {
+            if (progressWindow.IsVisible) progressWindow.Close();
+            bool openPage = AppDialog.Confirm(
+                this,
+                "Could not update",
+                Redaction.Scrub(error.Message) + "\n\nOpen the download page instead?",
+                "Open download",
+                "Not now");
+            if (openPage) AppUpdater.OpenReleasePage(update);
+            Snooze(AppSettings.Current, tagKey, days: 1);
+        }
+    }
+
+    private static bool IsSnoozed(AppSettings settings, string tagKey, DateTime utcNow) =>
+        !string.IsNullOrEmpty(settings.SnoozedUpdateVersion)
+        && NormalizeUpdateTag(settings.SnoozedUpdateVersion) == tagKey
+        && settings.SnoozeUntilUtc is DateTime until
+        && until > utcNow;
+
+    private static void Snooze(AppSettings settings, string tagKey, int days)
+    {
+        settings.SnoozedUpdateVersion = tagKey;
+        settings.SnoozeUntilUtc = DateTime.UtcNow.AddDays(days);
+        settings.Save();
+    }
+
+    private static string NormalizeUpdateTag(string tag)
+    {
+        string text = tag.Trim();
+        if (text.StartsWith('v') || text.StartsWith('V')) text = text[1..];
+        return text;
+    }
+
+    private static string FormatUpdateLabel(string tag)
+    {
+        string text = tag.Trim();
+        return text.StartsWith('v') || text.StartsWith('V') ? text : "v" + text;
     }
 
     public async Task OfferRecordingAsync(UnfinishedRecording recording)
